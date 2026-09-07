@@ -8,6 +8,10 @@ File Suite is a desktop utility for Linux systems designed to organize loose fil
 
 The application strictly operates on files located directly in the root of the selected directory. It deliberately ignores subdirectories and hidden dotfiles to prevent unintended modifications to existing folder hierarchies.
 
+
+<img width="818" height="647" alt="file_suite_gui" src="https://github.com/user-attachments/assets/c172f2b5-ffd7-4472-92be-286c5360937d" />
+
+
 ---
 
 ## Features
