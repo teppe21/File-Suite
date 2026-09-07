@@ -75,7 +75,6 @@ git clone https://github.com/teppe21/File-Suite.git
 cd File-Suite
 chmod +x install.sh
 ./install.sh
-<<<<<<< HEAD
 ```
 
 After running the script, File Suite will be available in your desktop environment's application menu.
