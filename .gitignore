@@ -1,0 +1,20 @@
+# Python futtatási és cache fájlok
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# PyInstaller fordítási mappák és átmeneti fájlok
+build/
+dist/
+*.spec
+
+# IDE / Szerkesztő beállítások
+.vscode/
+.idea/
+
+# Linux / Rendszer fájlok
+.DS_Store
+*.log
