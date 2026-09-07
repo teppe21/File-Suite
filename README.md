@@ -8,6 +8,10 @@ File Suite is a desktop utility for Linux systems designed to organize loose fil
 
 The application operates only on files located directly in the selected directory. It ignores subdirectories and hidden dotfiles to prevent unintended changes to existing folder structures.
 
+
+<img width="818" height="647" alt="file_suite_gui" src="https://github.com/user-attachments/assets/c172f2b5-ffd7-4472-92be-286c5360937d" />
+
+
 ---
 
 ## Features
@@ -70,6 +74,7 @@ git clone https://github.com/teppe21/File-Suite.git
 cd File-Suite
 chmod +x install.sh
 ./install.sh
+<<<<<<< HEAD
 ```
 
 After running the script, File Suite will be available in your desktop environment's application menu.
@@ -104,3 +109,5 @@ File-Suite/
 ## License
 
 Distributed under the MIT License. See `LICENSE` for details.
+=======
+>>>>>>> 3f8b4be19fc777b2a62d1c7b058b5215606b6abe
