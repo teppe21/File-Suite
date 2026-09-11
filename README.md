@@ -37,9 +37,6 @@ left untouched.
   from escaping the selected directory.
 - Dark-mode GUI built with CustomTkinter, with an in-app activity log.
 
-## Screenshots
-
-![Duplicate handling dialog](screenshots/duplicates-dialog.png)
 
 ## Requirements
 
@@ -145,9 +142,6 @@ File-Suite/
 ├── main.py                  # CustomTkinter application and entry point
 ├── organizer.jpg            # application icon
 ├── requirements.txt         # Python dependencies
-├── screenshots/
-│   ├── main-window.png
-│   └── duplicates-dialog.png
 └── tests/
     └── test_core.py         # unit tests for core.py
 ```
