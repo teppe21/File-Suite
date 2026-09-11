@@ -1,20 +1,22 @@
-# Python futtatási és cache fájlok
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
 .venv/
 venv/
 env/
 
-# PyInstaller fordítási mappák és átmeneti fájlok
+# Build artefacts
 build/
 dist/
 *.spec
 
-# IDE / Szerkesztő beállítások
+# Editors / OS
 .vscode/
 .idea/
-
-# Linux / Rendszer fájlok
+*.swp
 .DS_Store
-*.log

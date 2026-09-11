@@ -1,0 +1,2 @@
+customtkinter>=5.2,<6
+Pillow>=10,<12

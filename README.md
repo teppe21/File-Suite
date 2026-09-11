@@ -1,111 +1,56 @@
-# File Suite — Linux File Organizer & Duplicate Cleaner
+# File Suite
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge\&logo=python\&logoColor=white)
-![CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-blue?style=for-the-badge)
-![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge\&logo=linux\&logoColor=black)
+A small Linux desktop utility for organizing loose files and finding
+duplicates inside a selected directory.
 
-File Suite is a desktop utility for Linux systems designed to organize loose files and locate duplicate content within a chosen directory.
-
-The application operates only on files located directly in the selected directory. It ignores subdirectories and hidden dotfiles to prevent unintended changes to existing folder structures.
-
-
-<img width="855" height="743" alt="file_suite_gui_1" src="https://github.com/user-attachments/assets/024ccb96-71d3-4f6b-9d04-d0d905e0658a" />
-
-
-
----
+File Suite operates only on the files directly inside the chosen folder.
+Existing subdirectories, hidden dotfiles, and any other nested content are
+left untouched.
 
 ## Features
 
-* **Multi-Category & Custom Extension Grouping**
-  Allows selecting multiple preset file categories at once or specifying custom extensions to group files into user-defined target subfolders.
+- Organize files into preset categories (Images, Documents, Archives,
+  Media, Installers & Code) or a single user-defined subfolder.
+- Find byte-identical files using SHA-256 hashing (64 KB chunks, memory
+  friendly). Files whose sizes differ are skipped before hashing.
+- Choose what happens to duplicates: move them into a `Duplicates/`
+  subfolder, or send them to the freedesktop trash
+  (`~/.local/share/Trash/`).
+- Native directory picker via `zenity` (GTK) or `kdialog` (KDE) when
+  available, with a Tkinter fallback.
+- Non-recursive: only files directly in the selected directory are
+  processed.
+- Hidden files (names starting with `.`) are skipped.
+- Collision-safe: existing destination files are never overwritten.
+  Renamed files keep their full extension (`backup.tar.gz` →
+  `backup_1.tar.gz`).
+- User-supplied destination folder names are validated to prevent them
+  from escaping the selected directory.
+- Dark-mode GUI built with CustomTkinter, with an in-app activity log.
 
-* **Flexible Duplicate Action Handling**
-  When duplicates are found, the user can choose to either move them into a dedicated `Duplicates/` folder or send them directly to the Linux System Trash (`~/.local/share/Trash/`).
+## Requirements
 
-* **Native Desktop Directory Picker**
-  Uses system-native GTK (`zenity`) or KDE (`kdialog`) folder choosers when available.
+- Linux
+- Python 3.10 or newer (for running from source or building)
+- A working Tk installation (usually shipped with Python on Linux)
 
-* **SHA-256 Duplicate Detection**
-  Identifies identical files by computing SHA-256 hashes in 64 KB chunks, allowing large files to be processed without high memory usage.
+Optional, for a native folder picker:
 
-* **Non-Recursive Execution**
-  Processes only files directly inside the selected directory while leaving existing subfolders untouched.
+- `zenity` (GNOME / GTK desktops)
+- `kdialog` (KDE desktops)
 
-* **Ignores Hidden Files**
-  System files and dotfiles, such as `.git` or `.bashrc`, are skipped and remain unmodified.
+If neither is installed, the app falls back to a standard Tk folder
+dialog.
 
-* **Dark Mode GUI**
-  Built with CustomTkinter, providing a simple interface with an integrated activity log.
-
-* **Collision Protection**
-  Automatically renames destination files if a file with the same name already exists, preventing accidental overwrites.
-
----
-
-## Technical Stack
-
-* **CustomTkinter** — Graphical interface components.
-
-* **Pillow** — Image processing and application window icon integration.
-
-* **System Utilities (Zenity/Kdialog)** — Native Linux directory chooser integration.
-
-* **Python Standard Library**
-
-  * `pathlib` — Path operations and directory traversal
-  * `hashlib` — SHA-256 hashing
-  * `shutil` — File moving operations
-
----
-
-## Installation
-
-### Requirements
-
-* Linux OS
-* Python 3.10 or newer
-
-### Setup
-
-Clone the repository and run the installation script:
+## Running from source (development)
 
 ```bash
 git clone https://github.com/teppe21/File-Suite.git
 cd File-Suite
-chmod +x install.sh
-./install.sh
-```
 
-After running the script, File Suite will be available in your desktop environment's application menu.
+python3 -m venv .venv
+source .venv/bin/activate
 
----
+python3 -m pip install -r requirements.txt
 
-## Safety & Non-Recursive Rules
-
-File Suite follows a non-recursive approach when processing directories:
-
-* Only files located directly in the selected directory are scanned.
-* Existing subfolders are completely skipped.
-* Hidden files starting with `.` are ignored.
-* Sorting a directory will not affect existing folders such as `Documents/`, `Projects/`, or version control directories like `.git/`.
-* Destination conflicts are handled by adding sequential suffixes instead of replacing existing files.
-
----
-
-## Project Structure
-
-```text
-File-Suite/
-├── install.sh      # Shell script for desktop shortcut setup
-├── main.py         # Application logic and CustomTkinter interface
-├── organizer.jpg   # Application icon
-├── README.md       # Documentation
-└── .gitignore      # Tracked file exclusions
-```
-
----
-
-## License
-
-Distributed under the MIT License. See `LICENSE` for details.
+python3 main.py
