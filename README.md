@@ -1,11 +1,20 @@
 # File Suite
 
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-blue?style=for-the-badge)
+![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+
 A small Linux desktop utility for organizing loose files and finding
 duplicates inside a selected directory.
 
 File Suite operates only on the files directly inside the chosen folder.
 Existing subdirectories, hidden dotfiles, and any other nested content are
 left untouched.
+
+<img width="855" height="743" alt="file_suite_gui_1" src="https://github.com/user-attachments/assets/d383ca1b-449c-4f55-8dc8-a02f7e3ad7b8" />
+<img width="421" height="272" alt="filesuiteduplicateshowcase" src="https://github.com/user-attachments/assets/a6ff52e4-3be8-465d-a695-6e43c4d8e78e" />
+
+
 
 ## Features
 
