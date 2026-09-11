@@ -43,6 +43,39 @@ class ValidateFolderNameTests(unittest.TestCase):
         ok, _ = validate_folder_name("/tmp")
         self.assertFalse(ok)
 
+    def test_tilde_prefix(self):
+        for name in ["~", "~/foo", "~user"]:
+            ok, _ = validate_folder_name(name)
+            self.assertFalse(ok, f"{name!r} should be rejected")
+
+    def test_control_characters(self):
+        # ASCII control characters (tab, newline, CR, NUL, escape) and
+        # DEL must all be rejected.
+        for name in [
+            "foo\tbar",
+            "foo\nbar",
+            "foo\rbar",
+            "foo\x00bar",
+            "foo\x01bar",
+            "foo\x1bbar",
+            "foo\x7fbar",
+        ]:
+            ok, _ = validate_folder_name(name)
+            self.assertFalse(ok, f"{name!r} should be rejected")
+
+    def test_unicode_names_are_allowed(self):
+        # Unicode folder names are legal on Linux and must be accepted.
+        for name in ["Képek", "Dokumentumok", "日本語", "café", "naïve_folder"]:
+            ok, cleaned = validate_folder_name(name)
+            self.assertTrue(ok, f"{name!r} should be accepted")
+            self.assertEqual(cleaned, name)
+
+    def test_symbols_in_names(self):
+        # Colon, question mark, asterisk etc. are legal on Linux.
+        for name in ["foo:bar", "foo?bar", "foo*bar", "a'b", 'a"b']:
+            ok, _ = validate_folder_name(name)
+            self.assertTrue(ok, f"{name!r} should be accepted")
+
     def test_resolve_destination_rejects_escape(self):
         with TemporaryDirectory() as tmp:
             target = Path(tmp)

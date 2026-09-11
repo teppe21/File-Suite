@@ -44,8 +44,12 @@ MULTI_EXTENSIONS: tuple[str, ...] = (
     ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst",
 )
 
-# Allow letters, digits, spaces, dashes, underscores, dots (not leading).
-_FOLDER_NAME_RE = re.compile(r"^[^\x00/\\]+$")
+# Reject NUL, ASCII control characters (\x00-\x1f, which includes tab,
+# newline, carriage return, and escape), DEL (\x7f), and path separators
+# ("/" and "\\"). Everything else is allowed, because Linux filesystems
+# support arbitrary UTF-8 names (including spaces, dots, dashes,
+# underscores, and non-ASCII letters).
+_FOLDER_NAME_RE = re.compile(r"^[^\x00-\x1f\x7f/\\]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +61,19 @@ def validate_folder_name(name: str) -> tuple[bool, str]:
     Validate a user-supplied destination subfolder name.
 
     Returns ``(True, cleaned_name)`` on success or ``(False, error_message)``
-    on failure. The name must be a single path component: no separators,
-    no absolute paths, no ``.``/``..``, no control characters.
+    on failure.
+
+    Rejected inputs:
+      - ``None`` or empty / whitespace-only names
+      - ``.`` and ``..``
+      - names starting with ``~``
+      - absolute paths
+      - names containing ``/`` or ``\\``
+      - names containing ASCII control characters (``\\x00``-``\\x1f``)
+        or DEL (``\\x7f``)
+
+    Everything else is accepted, since Linux filesystems support arbitrary
+    UTF-8 names.
     """
     if name is None:
         return False, "Folder name is required."
