@@ -234,7 +234,7 @@ def build_collision_safe_path(dest_dir: Path, filename: str) -> Path:
         file            -> file_1
     """
     candidate = dest_dir / filename
-    if not candidate.exists():
+    if not (candidate.exists() or candidate.is_symlink()):
         return candidate
 
     stem, suffix = split_stem_and_suffix(filename)
@@ -242,7 +242,7 @@ def build_collision_safe_path(dest_dir: Path, filename: str) -> Path:
     while True:
         new_name = f"{stem}_{counter}{suffix}"
         candidate = dest_dir / new_name
-        if not candidate.exists():
+        if not (candidate.exists() or candidate.is_symlink()):
             return candidate
         counter += 1
 

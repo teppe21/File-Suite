@@ -175,6 +175,40 @@ def build_organization_plan(
     return True, plan, None
 
 
+def _validate_destination_containment(dest: Path, target_root: Path) -> tuple[bool, str | None]:
+    """
+    Validate that destination directory and path strictly resolve within target_root,
+    rejecting any symbolic link path components to prevent directory traversal attacks.
+    """
+    try:
+        resolved_root = target_root.resolve(strict=True)
+    except OSError as exc:
+        return False, f"Target root directory is inaccessible: {exc}"
+
+    # Verify no parent directory component between target_root and dest is a symlink
+    curr = dest.parent
+    while curr != target_root and curr != curr.parent:
+        if curr.is_symlink():
+            return False, f"Destination path component '{curr.name}' is a symbolic link"
+        curr = curr.parent
+
+    dest_dir = dest.parent
+    if dest_dir.exists():
+        if dest_dir.is_symlink():
+            return False, f"Destination directory '{dest_dir.name}' is a symbolic link"
+        try:
+            resolved_dest_dir = dest_dir.resolve(strict=True)
+            if not resolved_dest_dir.is_relative_to(resolved_root):
+                return False, "Destination directory escapes the target root directory"
+        except OSError as exc:
+            return False, f"Failed to resolve destination directory: {exc}"
+
+    if dest.is_symlink():
+        return False, f"Destination path '{dest.name}' is already an existing symbolic link"
+
+    return True, None
+
+
 def execute_operation_plan(
     plan: OperationPlan,
     on_progress: Callable[[int, int, str], None] | None = None,
@@ -186,6 +220,7 @@ def execute_operation_plan(
       - Source still exists.
       - Source is not a symlink.
       - Source is a regular file.
+      - Destination parent containment inside target_dir (no symlink traversal).
       - Destination directory exists or is safely created.
       - Destination does not overwrite existing file (collision fallback applied).
 
@@ -246,7 +281,15 @@ def execute_operation_plan(
         except OSError:
             pass
 
-        # Ensure destination directory exists
+        # TOCTOU check 5: Destination containment and symlink protection
+        ok_dest, dest_err = _validate_destination_containment(dest, plan.target_dir)
+        if not ok_dest:
+            item.status = OperationStatus.FAILED
+            item.error_message = dest_err or "Destination validation failed"
+            result.failed_moves.append((src, dest, item.error_message))
+            continue
+
+        # Ensure destination directory exists safely
         dest_dir = dest.parent
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -256,11 +299,29 @@ def execute_operation_plan(
             result.failed_moves.append((src, dest, item.error_message))
             continue
 
-        # TOCTOU check 5: Avoid overwriting existing destination
+        # Post-mkdir containment verification
+        try:
+            resolved_dest_dir = dest_dir.resolve(strict=True)
+            if not resolved_dest_dir.is_relative_to(plan.target_dir.resolve(strict=True)):
+                item.status = OperationStatus.FAILED
+                item.error_message = "Destination directory escapes the target root directory"
+                result.failed_moves.append((src, dest, item.error_message))
+                continue
+        except OSError as exc:
+            item.status = OperationStatus.FAILED
+            item.error_message = f"Destination directory resolution failed: {exc}"
+            result.failed_moves.append((src, dest, item.error_message))
+            continue
+
+        # TOCTOU check 6: Avoid overwriting existing destination or symlink
         actual_dest = dest
-        if actual_dest.exists() or actual_dest in allocated_destinations:
+        if actual_dest.exists() or actual_dest.is_symlink() or actual_dest in allocated_destinations:
             actual_dest = build_collision_safe_path(dest_dir, src.name)
-            while actual_dest in allocated_destinations:
+            while (
+                actual_dest in allocated_destinations
+                or actual_dest.exists()
+                or actual_dest.is_symlink()
+            ):
                 actual_dest = build_collision_safe_path(dest_dir, actual_dest.name)
 
         allocated_destinations.add(actual_dest)
@@ -287,8 +348,10 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
 
     Reverses: destination -> source.
     Safety checks:
-      - Never overwrites an existing file at original source location.
-      - Handles partial failure transparently.
+      - Validates destination still exists, is a regular file, and is not a symlink.
+      - Re-validates original source parent containment inside plan_target_dir.
+      - Never overwrites an existing file or symlink at the original location (collision suffix applied).
+      - Handles partial failure transparently and retains only un-restored records for retry.
 
     Returns:
       (undone_count: int, failed_count: int, error_messages: list[str])
@@ -302,26 +365,60 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
     undone_count = 0
     failed_count = 0
     errors: list[str] = []
+    retained_moves: list[MoveRecord] = []
+
+    try:
+        resolved_root = result.plan_target_dir.resolve(strict=True)
+    except OSError as exc:
+        return 0, len(result.successful_moves), [f"Target root directory inaccessible: {exc}"]
 
     # Process in reverse order of original execution
-    for record in reversed(result.successful_moves):
+    for record in reversed(list(result.successful_moves)):
         current_loc = record.destination
         original_loc = record.source
 
         if not current_loc.exists():
             failed_count += 1
             errors.append(f"Cannot restore '{current_loc.name}': file no longer exists at destination.")
+            retained_moves.append(record)
             continue
 
         if current_loc.is_symlink():
             failed_count += 1
-            errors.append(f"Cannot restore '{current_loc.name}': path is a symbolic link.")
+            errors.append(f"Cannot restore '{current_loc.name}': destination path is a symbolic link.")
+            retained_moves.append(record)
             continue
 
-        # Prevent overwriting if original location now has another file
+        if not current_loc.is_file():
+            failed_count += 1
+            errors.append(f"Cannot restore '{current_loc.name}': destination path is not a regular file.")
+            retained_moves.append(record)
+            continue
+
+        orig_parent = original_loc.parent
+        if orig_parent.is_symlink():
+            failed_count += 1
+            errors.append(f"Cannot restore '{current_loc.name}': original folder is a symbolic link.")
+            retained_moves.append(record)
+            continue
+
+        try:
+            resolved_orig_parent = orig_parent.resolve(strict=True)
+            if not resolved_orig_parent.is_relative_to(resolved_root):
+                failed_count += 1
+                errors.append(f"Cannot restore '{current_loc.name}': original location escapes root directory.")
+                retained_moves.append(record)
+                continue
+        except OSError as exc:
+            failed_count += 1
+            errors.append(f"Cannot restore '{current_loc.name}': original folder inaccessible: {exc}")
+            retained_moves.append(record)
+            continue
+
+        # Prevent overwriting if original location now has another file or symlink
         target_restore = original_loc
-        if target_restore.exists():
-            target_restore = build_collision_safe_path(original_loc.parent, original_loc.name)
+        if target_restore.exists() or target_restore.is_symlink():
+            target_restore = build_collision_safe_path(orig_parent, original_loc.name)
             errors.append(
                 f"Original location for '{original_loc.name}' was occupied; restored as '{target_restore.name}'."
             )
@@ -333,17 +430,22 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
         except OSError as exc:
             failed_count += 1
             errors.append(f"Failed to restore '{current_loc.name}': {exc}")
+            retained_moves.append(record)
 
-    # Clear undone items from record to prevent double-undo
-    result.successful_moves.clear()
+    # Retain only failed moves in result so subsequent retries only process un-restored items
+    result.successful_moves = list(reversed(retained_moves))
     return undone_count, failed_count, errors
 
 
-def move_to_system_trash(file_path: Path) -> tuple[bool, str | None]:
+def move_to_system_trash(
+    file_path: Path,
+    trash_dir: Path | None = None,
+) -> tuple[bool, str | None]:
     """
     Move a file to the FreeDesktop system trash (~/.local/share/Trash).
 
-    Creates compliant .trashinfo metadata.
+    Creates compliant .trashinfo metadata. Cleans up orphaned metadata
+    if moving the file fails.
     Returns (success: bool, error_message: str | None).
     """
     if not file_path.exists():
@@ -352,8 +454,12 @@ def move_to_system_trash(file_path: Path) -> tuple[bool, str | None]:
     if file_path.is_symlink():
         return False, f"Refusing to trash symbolic link for safety: {file_path.name}"
 
-    trash_files_dir = Path.home() / ".local/share/Trash/files"
-    trash_info_dir = Path.home() / ".local/share/Trash/info"
+    if not file_path.is_file():
+        return False, f"Path is not a regular file: {file_path.name}"
+
+    base_trash = trash_dir if trash_dir is not None else Path.home() / ".local/share/Trash"
+    trash_files_dir = base_trash / "files"
+    trash_info_dir = base_trash / "info"
 
     try:
         trash_files_dir.mkdir(parents=True, exist_ok=True)
@@ -370,12 +476,20 @@ def move_to_system_trash(file_path: Path) -> tuple[bool, str | None]:
         f"[Trash Info]\nPath={escaped_path}\nDeletionDate={deletion_date}\n"
     )
 
+    info_created = False
     try:
         with open(info_path, "w", encoding="utf-8") as fh:
             fh.write(info_content)
+        info_created = True
+
         shutil.move(str(file_path), str(dest_path))
         return True, None
     except OSError as exc:
+        if info_created:
+            try:
+                info_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         return False, f"Failed to trash '{file_path.name}': {exc}"
 
 

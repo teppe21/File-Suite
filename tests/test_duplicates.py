@@ -113,6 +113,99 @@ class DuplicateScanTests(unittest.TestCase):
         h = calculate_sha256(f, chunk_size=10, cancel_event=cancel_event)
         self.assertIsNone(h)
 
+    def test_deterministic_ordering(self):
+        """Original selection is deterministic and independent of filesystem iteration order."""
+        content = b"deterministic duplicate test"
+        # Create files with various alphabetical names
+        (self.target / "zebra.bin").write_bytes(content)
+        (self.target / "Apple.bin").write_bytes(content)
+        (self.target / "banana.bin").write_bytes(content)
+
+        groups = scan_duplicates(self.target)
+        self.assertEqual(len(groups), 1)
+
+        group = groups[0]
+        # "Apple.bin" must be the deterministic original (case-insensitive sorted first)
+        self.assertEqual(group.original.path.name, "Apple.bin")
+        dup_names = [f.path.name for f in group.duplicates]
+        self.assertEqual(dup_names, ["banana.bin", "zebra.bin"])
+
+    def test_hardlinks_reclaimable_bytes(self):
+        """Reclaimable bytes calculation accounts for shared inodes (hardlinks)."""
+        content = b"shared inode data" * 100
+        size = len(content)
+
+        orig = self.target / "original.dat"
+        orig.write_bytes(content)
+
+        # Create a hardlink to orig
+        hardlink = self.target / "hardlink.dat"
+        try:
+            os.link(orig, hardlink)
+        except OSError:
+            self.skipTest("Hard links not supported in environment")
+
+        # Create an independent file with identical content
+        independent = self.target / "independent.dat"
+        independent.write_bytes(content)
+
+        groups = scan_duplicates(self.target)
+        self.assertEqual(len(groups), 1)
+        group = groups[0]
+
+        # 3 files total, but only 1 independent duplicate frees actual disk blocks
+        self.assertEqual(len(group.files), 3)
+        self.assertEqual(group.reclaimable_bytes, size)
+
+    def test_file_disappearing_during_scan(self):
+        """A candidate disappearing during the scan does not crash the engine."""
+        content = b"temporary candidate"
+        f1 = self.target / "f1.dat"
+        f2 = self.target / "f2.dat"
+        f1.write_bytes(content)
+        f2.write_bytes(content)
+
+        # Delete f1 right before hashing by intercepting calculate_sha256 or simply unlinking
+        # If f1 is unlinked before hash:
+        f1.unlink()
+
+        groups = scan_duplicates(self.target)
+        # Only f2 remained, so no duplicate group formed, and engine didn't crash
+        self.assertEqual(len(groups), 0)
+
+    def test_unreadable_file_handled_gracefully(self):
+        """Unreadable files (permission errors) are skipped without aborting the scan."""
+        content = b"permission test"
+        f1 = self.target / "f1.dat"
+        f2 = self.target / "f2.dat"
+        f1.write_bytes(content)
+        f2.write_bytes(content)
+
+        # Make f1 unreadable
+        try:
+            f1.chmod(0o000)
+        except OSError:
+            self.skipTest("chmod not supported")
+
+        try:
+            groups = scan_duplicates(self.target)
+            # Scan completed cleanly without raising PermissionError
+            self.assertEqual(len(groups), 0)
+        finally:
+            f1.chmod(0o644)
+
+    def test_empty_files_handling(self):
+        """0-byte duplicate files are detected cleanly with 0 reclaimable bytes."""
+        (self.target / "empty1.txt").write_bytes(b"")
+        (self.target / "empty2.txt").write_bytes(b"")
+
+        groups = scan_duplicates(self.target)
+        self.assertEqual(len(groups), 1)
+        group = groups[0]
+        self.assertEqual(group.size, 0)
+        self.assertEqual(group.reclaimable_bytes, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -26,3 +26,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S108"]  # Asserts and mock /tmp paths in unit tests
+
+[tool.bandit]
+exclude_dirs = [".venv", "venv", "tests", "build", "dist"]
+skips = ["B404", "B603", "B607"]

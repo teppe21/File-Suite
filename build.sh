@@ -9,17 +9,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-VERSION="1.1.0"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-
-echo "=========================================="
-echo " Building File Suite v${VERSION}"
-echo "=========================================="
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     echo "Error: '$PYTHON_BIN' was not found in PATH." >&2
     exit 1
 fi
+
+VERSION="$("$PYTHON_BIN" -c "import version; print(version.__version__)")"
+
+echo "=========================================="
+echo " Building File Suite v${VERSION}"
+echo "=========================================="
 
 if [ ! -d ".venv" ]; then
     echo "Creating virtual environment in .venv ..."

@@ -37,6 +37,7 @@ from operations import (
     move_to_system_trash,
     undo_last_operation,
 )
+from version import __version__
 
 
 def _resource_path(name: str) -> Path:
@@ -82,7 +83,7 @@ class FileOrganizerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("File Suite — Filesystem Organizer & Duplicate Cleaner")
+        self.title(f"File Suite v{__version__} — Filesystem Organizer & Duplicate Cleaner")
         self.geometry("920x760")
         self.minsize(840, 640)
         self.configure(fg_color=THEME["bg_main"])
@@ -184,7 +185,7 @@ class FileOrganizerApp(ctk.CTk):
 
         ctk.CTkLabel(
             brand_frame,
-            text="v1.1.0",
+            text=f"v{__version__}",
             font=ctk.CTkFont(size=11),
             text_color=THEME["text_muted"],
         ).pack(side="left", padx=(8, 0), pady=(3, 0))
@@ -598,7 +599,9 @@ class FileOrganizerApp(ctk.CTk):
                 self.log("ERROR", f"  Failed: {src.name} — {err}")
             messagebox.showwarning(
                 "Partial Execution",
-                f"{result.success_count} files were organized, but {result.failure_count} encountered errors. Check Activity Log for details.",
+                f"What happened:\n{result.success_count} file(s) were organized, but {result.failure_count} encountered errors.\n\n"
+                "Why:\nOne or more files were modified, locked, or moved prior to execution.\n\n"
+                "Next steps:\nCheck the Activity Log tab for detailed per-file diagnostics.",
             )
 
         self.set_status(
@@ -632,6 +635,12 @@ class FileOrganizerApp(ctk.CTk):
             self.log("ERROR", f"Undo encountered {failed} error(s).")
             for err in errors:
                 self.log("ERROR", f"  {err}")
+            messagebox.showwarning(
+                "Undo Finished with Errors",
+                f"What happened:\n{undone} file(s) were restored, but {failed} could not be restored.\n\n"
+                "Why:\nOriginal locations may be occupied by newly created files, or destination files were modified.\n\n"
+                "Next steps:\nReview the Activity Log tab for details on un-restored items.",
+            )
 
         self.set_status(
             "COMPLETED",
@@ -1050,7 +1059,15 @@ class FileOrganizerApp(ctk.CTk):
         self._update_undo_button_state()
 
         self.log("SUCCESS", f"Sent {success_count} file(s) to system trash ({failed_count} failed).")
-        self.set_status("COMPLETED", f"Trashed {success_count} file(s).", THEME["success"])
+        self.set_status("COMPLETED", f"Trashed {success_count} file(s).", THEME["success"] if failed_count == 0 else THEME["warning"])
+
+        if failed_count > 0:
+            messagebox.showwarning(
+                "Trash Finished with Errors",
+                f"What happened:\n{success_count} file(s) moved to trash, but {failed_count} encountered errors.\n\n"
+                "Why:\nSome files may be locked, symbolic links, or removed externally.\n\n"
+                "Next steps:\nReview the Activity Log tab for details.",
+            )
 
         self.duplicate_groups.clear()
         self._render_duplicate_groups()

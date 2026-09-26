@@ -124,7 +124,9 @@ def scan_duplicates(
 
         file_hash = calculate_sha256(file_path, cancel_event=cancel_event)
         if file_hash is None:
-            # File unreadable or cancelled
+            if cancel_event is not None and cancel_event.is_set():
+                return []
+            progress.files_skipped += 1
             continue
 
         hash_map.setdefault(file_hash, []).append(file_path)
@@ -134,25 +136,34 @@ def scan_duplicates(
         if on_progress:
             on_progress(progress)
 
-    # Form structured DuplicateGroup objects
+    # Form structured DuplicateGroup objects.
+    # Deterministic ordering rule:
+    # 1. Within each group, files are sorted lexicographically by case-insensitive name,
+    #    with the full path string used as tie-breaker: (p.name.casefold(), str(p)).
+    #    The first file in this sorted order is preserved as the default "original".
+    # 2. Groups themselves are sorted by the original file's name and hash.
     groups: list[DuplicateGroup] = []
-    group_counter = 1
 
     for file_hash, matching_paths in hash_map.items():
         if len(matching_paths) >= 2:
+            sorted_paths = sorted(matching_paths, key=lambda p: (p.name.casefold(), str(p)))
+
             try:
-                single_size = matching_paths[0].stat().st_size
+                single_size = sorted_paths[0].stat().st_size
             except OSError:
                 single_size = 0
 
-            # First occurrence is the original (not selected for removal)
-            # Subsequent occurrences are duplicates (selected for action by default)
             dup_files: list[DuplicateFile] = []
-            for i, p in enumerate(matching_paths):
+            for i, p in enumerate(sorted_paths):
                 try:
-                    f_size = p.stat().st_size
+                    st = p.stat()
+                    f_size = st.st_size
+                    f_inode = st.st_ino
+                    f_dev = st.st_dev
                 except OSError:
                     f_size = single_size
+                    f_inode = None
+                    f_dev = None
 
                 dup_files.append(
                     DuplicateFile(
@@ -160,18 +171,24 @@ def scan_duplicates(
                         size=f_size,
                         is_original=(i == 0),
                         selected=(i > 0),
+                        inode=f_inode,
+                        device=f_dev,
                     )
                 )
 
             groups.append(
                 DuplicateGroup(
-                    group_id=f"group-{group_counter}",
+                    group_id="",  # Assigned after sorting all groups
                     sha256=file_hash,
                     size=single_size,
                     files=dup_files,
                 )
             )
-            group_counter += 1
+
+    # Sort groups deterministically and assign sequential group IDs
+    groups.sort(key=lambda g: (g.files[0].path.name.casefold(), g.sha256))
+    for idx, group in enumerate(groups, 1):
+        group.group_id = f"group-{idx}"
 
     progress.step = "Complete"
     if on_progress:

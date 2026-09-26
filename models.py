@@ -120,6 +120,8 @@ class DuplicateFile:
     size: int
     is_original: bool = False
     selected: bool = False  # Checked for action (e.g. move to Duplicates or Trash)
+    inode: int | None = None
+    device: int | None = None
 
 
 @dataclass
@@ -148,8 +150,33 @@ class DuplicateGroup:
 
     @property
     def reclaimable_bytes(self) -> int:
-        """Space that would be freed if all non-original duplicates were removed."""
-        return max(0, len(self.files) - 1) * self.size
+        """
+        Estimate physical disk space reclaimed if non-original files are removed.
+        Accounts for hard links: multiple links to the same underlying inode
+        or links to the preserved original do not yield duplicate block reclaim.
+        """
+        if len(self.files) <= 1:
+            return 0
+
+        orig = self.original
+        orig_dev_ino = (
+            (orig.device, orig.inode)
+            if (orig and orig.device is not None and orig.inode is not None)
+            else None
+        )
+
+        unique_dup_inodes: set[tuple[int, int]] = set()
+        untracked_duplicates = 0
+
+        for f in self.duplicates:
+            if f.device is not None and f.inode is not None:
+                dev_ino = (f.device, f.inode)
+                if orig_dev_ino is None or dev_ino != orig_dev_ino:
+                    unique_dup_inodes.add(dev_ino)
+            else:
+                untracked_duplicates += 1
+
+        return (len(unique_dup_inodes) + untracked_duplicates) * self.size
 
 
 @dataclass

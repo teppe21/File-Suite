@@ -8,12 +8,14 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from models import OperationStatus
+from models import ExecutionResult, OperationStatus
 from operations import (
     build_duplicate_move_plan,
     build_organization_plan,
     execute_operation_plan,
+    move_to_system_trash,
     undo_last_operation,
 )
 
@@ -211,6 +213,176 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertTrue(f1.exists())
         self.assertTrue(f2.exists())
 
+    def test_destination_replaced_by_symlink_before_execution(self):
+        """Prevent traversal if destination folder is replaced by a symlink before execution."""
+        f = self.target / "contract.pdf"
+        f.write_text("sensitive")
+
+        ok, plan, _ = build_organization_plan(self.target, {".pdf"})
+        self.assertTrue(ok)
+
+        # Before execute, external party creates a symlink named 'Documents' pointing elsewhere
+        outside_dir = self.target.parent / "outside_dir"
+        outside_dir.mkdir(exist_ok=True)
+        symlink_docs = self.target / "Documents"
+        try:
+            os.symlink(outside_dir, symlink_docs)
+        except OSError:
+            self.skipTest("Symlinks not supported")
+
+        result = execute_operation_plan(plan)
+        self.assertEqual(result.success_count, 0)
+        self.assertEqual(result.failure_count, 1)
+        self.assertTrue(any("symbolic link" in err for _, _, err in result.failed_moves))
+        # Ensure file was not moved into outside_dir
+        self.assertFalse((outside_dir / "contract.pdf").exists())
+        self.assertTrue(f.exists())
+
+    def test_undo_destination_is_symlink(self):
+        """Undo refuses to restore a file if its destination was replaced by a symlink."""
+        f = self.target / "file.txt"
+        f.write_text("data")
+
+        ok, plan, _ = build_organization_plan(self.target, {".txt"})
+        self.assertTrue(ok)
+        result = execute_operation_plan(plan)
+        self.assertEqual(result.success_count, 1)
+
+        moved_dest = self.target / "Documents" / "file.txt"
+        self.assertTrue(moved_dest.exists())
+
+        # Replace moved file with a symlink before undo
+        outside_file = self.target.parent / "outside.txt"
+        outside_file.write_text("outside")
+        moved_dest.unlink()
+        try:
+            os.symlink(outside_file, moved_dest)
+        except OSError:
+            self.skipTest("Symlinks not supported")
+
+        undone, failed, errors = undo_last_operation(result)
+        self.assertEqual(undone, 0)
+        self.assertEqual(failed, 1)
+        self.assertTrue(any("symbolic link" in err for err in errors))
+
+    def test_undo_partial_failure_and_retry(self):
+        """Undo tracks un-restored items so repeated undo only retries failed moves."""
+        f1 = self.target / "f1.txt"
+        f2 = self.target / "f2.txt"
+        f1.write_text("1")
+        f2.write_text("2")
+
+        ok, plan, _ = build_organization_plan(self.target, {".txt"})
+        self.assertTrue(ok)
+        result = execute_operation_plan(plan)
+        self.assertEqual(result.success_count, 2)
+
+        # Delete one destination file to force partial undo failure
+        (self.target / "Documents" / "f1.txt").unlink()
+
+        undone, failed, _ = undo_last_operation(result)
+        self.assertEqual(undone, 1)
+        self.assertEqual(failed, 1)
+        self.assertTrue(f2.exists())
+        self.assertFalse(f1.exists())
+
+        # Result now retains only the 1 failed move
+        self.assertEqual(len(result.successful_moves), 1)
+
+        # Repeated undo without fixing f1 still fails gracefully
+        undone2, failed2, _ = undo_last_operation(result)
+        self.assertEqual(undone2, 0)
+        self.assertEqual(failed2, 1)
+
+    def test_repeated_undo_no_op(self):
+        """Calling undo with no successful moves returns clear no-op message."""
+        res = ExecutionResult(plan_target_dir=self.target, successful_moves=[])
+        undone, failed, errors = undo_last_operation(res)
+        self.assertEqual(undone, 0)
+        self.assertEqual(failed, 0)
+        self.assertIn("No operations to undo.", errors)
+
+
+class SystemTrashTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self.trash_dir = self.target / "Trash"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_trash_success(self):
+        f = self.target / "to_delete.txt"
+        f.write_text("trash me")
+
+        ok, err = move_to_system_trash(f, trash_dir=self.trash_dir)
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        self.assertFalse(f.exists())
+
+        # Check file was placed in Trash/files
+        trashed_file = self.trash_dir / "files" / "to_delete.txt"
+        self.assertTrue(trashed_file.exists())
+        self.assertEqual(trashed_file.read_text(), "trash me")
+
+        # Check metadata was created in Trash/info
+        info_file = self.trash_dir / "info" / "to_delete.txt.trashinfo"
+        self.assertTrue(info_file.exists())
+        info_content = info_file.read_text()
+        self.assertIn("[Trash Info]", info_content)
+        self.assertIn("Path=", info_content)
+        self.assertIn("DeletionDate=", info_content)
+
+    def test_trash_collision(self):
+        f1 = self.target / "dup.txt"
+        f1.write_text("first")
+        ok, _ = move_to_system_trash(f1, trash_dir=self.trash_dir)
+        self.assertTrue(ok)
+
+        # Another file with identical name
+        f2 = self.target / "dup.txt"
+        f2.write_text("second")
+        ok2, _ = move_to_system_trash(f2, trash_dir=self.trash_dir)
+        self.assertTrue(ok2)
+
+        # Both exist in trash with collision-safe names
+        self.assertTrue((self.trash_dir / "files" / "dup.txt").exists())
+        self.assertTrue((self.trash_dir / "files" / "dup_1.txt").exists())
+        self.assertTrue((self.trash_dir / "info" / "dup.txt.trashinfo").exists())
+        self.assertTrue((self.trash_dir / "info" / "dup_1.txt.trashinfo").exists())
+
+    def test_trash_symlink_rejected(self):
+        real_file = self.target / "real.txt"
+        real_file.write_text("real")
+        symlink_file = self.target / "link.txt"
+        try:
+            os.symlink(real_file, symlink_file)
+        except OSError:
+            self.skipTest("Symlinks not supported")
+
+        ok, err = move_to_system_trash(symlink_file, trash_dir=self.trash_dir)
+        self.assertFalse(ok)
+        self.assertIn("Refusing to trash symbolic link", err or "")
+        self.assertTrue(symlink_file.exists())
+
+    def test_trash_move_failure_cleans_metadata(self):
+        f = self.target / "fail.txt"
+        f.write_text("fail data")
+
+        # Mock shutil.move to fail, simulating failure between metadata creation and file move
+        with patch("shutil.move", side_effect=OSError("Disk full")):
+            ok, err = move_to_system_trash(f, trash_dir=self.trash_dir)
+
+        self.assertFalse(ok)
+        self.assertIn("Disk full", err or "")
+        # Original file still exists
+        self.assertTrue(f.exists())
+        # Metadata must have been cleaned up and not left orphaned
+        info_file = self.trash_dir / "info" / "fail.txt.trashinfo"
+        self.assertFalse(info_file.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -28,9 +28,30 @@ jobs:
         run: |
           ruff check .
 
+  security:
+    name: Security Scan (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "bandit[toml]"
+
+      - name: Run Bandit security scanner
+        run: |
+          bandit -c pyproject.toml -r .
+
   test:
     name: Test (Python ${{ matrix.python-version }})
-    needs: lint
+    needs: [lint, security]
     runs-on: ubuntu-latest
     strategy:
       matrix:
