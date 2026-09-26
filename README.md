@@ -1,172 +1,213 @@
 # File Suite
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-blue?style=for-the-badge)
-![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Platform](https://img.shields.io/badge/Platform-Linux%20(X11%20%7C%20Wayland)-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Tests](https://img.shields.io/badge/Tests-42%20passed-success?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-A small Linux desktop utility for organizing loose files and finding
-duplicates inside a selected directory.
+A robust, portfolio-ready Linux desktop utility for organizing files and finding byte-identical duplicates inside a selected directory.
 
-File Suite operates only on the files directly inside the chosen folder.
-Existing subdirectories, hidden dotfiles, and any other nested content are
-left untouched.
+File Suite is built around a strict safety philosophy: **preview before mutation, zero data loss, and explicit user control**. It operates deterministically on loose files in the chosen target folder without descending into nested subdirectories or modifying hidden files.
 
-<img width="855" height="743" alt="file_suite_gui_1" src="https://github.com/user-attachments/assets/7dedf785-0935-4aad-81ed-2f11cd3f8917" />
-<img width="421" height="272" alt="filesuiteduplicateshowcase" src="https://github.com/user-attachments/assets/7ce58a2e-55c4-4999-b188-f4dac8106459" />
+<p align="center">
+  <img width="855" height="743" alt="File Suite Interface" src="https://github.com/user-attachments/assets/7dedf785-0935-4aad-81ed-2f11cd3f8917" />
+  <br/>
+  <img width="421" height="272" alt="Duplicate Manager" src="https://github.com/user-attachments/assets/7ce58a2e-55c4-4999-b188-f4dac8106459" />
+</p>
 
+---
 
+## Key Features
 
-## Features
+- **Dry-Run Preview Workflow**:
+  Inspect proposed moves before touching disk. The preview displays affected file counts, total size in MB, destination subfolders, and flags any collision renames in advance.
+- **Session-Based Undo**:
+  Made a mistake? One click restores all moved files back to their original root locations. Safe collision checks ensure newly created files at the root are never overwritten during undo.
+- **Structured Duplicate Manager**:
+  Group-by-group card view displaying SHA-256 digest prefixes and per-file byte sizes. Includes one-click presets like "Keep Originals Only" or "Select All Duplicates", with options to either isolate copies into a `Duplicates/` folder (undoable) or move them to system trash.
+- **Engineered Filesystem Safety**:
+  - **Symlink Protection**: Symlinks are strictly skipped to prevent unintended directory traversal, circular loops, or remote target deletion.
+  - **TOCTOU Resilience**: Files are re-validated immediately before moving to prevent race conditions.
+  - **Collision Avoidance**: Existing files are never overwritten; multi-part extensions are preserved cleanly (`archive_1.tar.gz`).
+  - **Path Traversal Prevention**: Custom folder names are strictly sanitized against directory traversal attacks (`../`, absolute paths, control characters).
+- **Zero-Latency UI & Background Workers**:
+  Duplicate scanning runs cooperatively on background threads with chunked 64 KB SHA-256 hashing. Large file sets stay responsive with live progress metrics and instant cancellation.
+- **Diagnostics & Activity Log**:
+  Built-in terminal and GUI log viewer recording timestamped operational records, errors, and fallback events.
+- **Native Desktop Integration**:
+  Auto-detects and uses native desktop dialogs (`zenity` on GTK/GNOME, `kdialog` on KDE) with graceful fallback to Tkinter.
 
-- Organize files into preset categories (Images, Documents, Archives,
-  Media, Installers & Code) or a single user-defined subfolder.
-- Find byte-identical files using SHA-256 hashing (64 KB chunks, memory
-  friendly). Files whose sizes differ are skipped before hashing.
-- Duplicate scanning runs on a background thread; the GUI stays
-  responsive even on large directories, with a progress bar and console
-  updates tracking scan progress.
-- Choose what happens to duplicates: move them into a `Duplicates/`
-  subfolder, or send them to the freedesktop trash
-  (`~/.local/share/Trash/`).
-- Native directory picker via `zenity` (GTK) or `kdialog` (KDE) when
-  available, with a Tkinter fallback.
-- Non-recursive: only files directly in the selected directory are
-  processed.
-- Hidden files (names starting with `.`) are skipped.
-- Collision-safe: existing destination files are never overwritten.
-  Renamed files keep their full extension (`backup.tar.gz` →
-  `backup_1.tar.gz`).
-- User-supplied destination folder names are validated to prevent them
-  from escaping the selected directory.
-- Dark-mode GUI built with CustomTkinter, with an in-app activity log.
+---
 
+## Architecture
+
+File Suite is designed with strict separation between user interface and underlying business logic:
+
+```mermaid
+graph TD
+    subgraph Presentation ["Presentation Layer (Tkinter / CustomTkinter)"]
+        UI["main.py: FileOrganizerApp"]
+        LOG["In-App Activity Log"]
+        DLG["Native File Dialogs (zenity / kdialog)"]
+    end
+
+    subgraph Domain ["Domain & Business Logic"]
+        MOD["models.py: Data Models & Plans"]
+        OPS["operations.py: Plan Generation, Execution & Undo"]
+        DUP["duplicates.py: Chunked SHA-256 Engine"]
+        CORE["core.py: Path Validation & Categories"]
+    end
+
+    subgraph Storage ["Linux Environment & Filesystem"]
+        FS["Root Directory (Non-Recursive)"]
+        TRASH["~/.local/share/Trash (FreeDesktop)"]
+        XDG["~/.local/share/applications (Desktop Integration)"]
+    end
+
+    UI --> OPS
+    UI --> DUP
+    UI --> MOD
+    OPS --> MOD
+    OPS --> CORE
+    DUP --> MOD
+    OPS --> FS
+    OPS --> TRASH
+    DUP --> FS
+```
+
+### Module Responsibilities
+
+| Module | Responsibility |
+| :--- | :--- |
+| `core.py` | Path validation, category extension dictionaries, and collision-safe renaming. |
+| `models.py` | Immutable data structures (`OperationPlan`, `OperationItem`, `DuplicateGroup`, etc.). |
+| `operations.py` | Dry-run plan computation, atomic moves, collision resolution, FreeDesktop trash, and session undo. |
+| `duplicates.py` | Size pre-filtering, 64 KB chunked SHA-256 hashing, and cooperative cancellation. |
+| `main.py` | Restrained graphite/slate dark UI, view routing, progress bars, and diagnostics. |
+
+---
+
+## Safety Model
+
+File Suite is engineered for predictable, non-destructive operation:
+
+1. **Non-Recursive Scope**: Operations are strictly restricted to the files located directly inside the active directory. Subfolders are never entered or mutated.
+2. **Symlink Isolation**: Symlinks are never followed, moved, or deleted (`os.path.islink()` validation).
+3. **Hidden File Exclusion**: Hidden files and dotfiles (e.g., `.gitignore`, `.bashrc`) are skipped by default.
+4. **Collision Protection**: In case of a naming conflict at destination, files are dynamically suffixed (`file_1.pdf`, `archive_1.tar.gz`) without overwriting existing data.
+5. **Path Traversal Defense**: User-supplied folder names cannot escape the root boundary. Characters like `/`, `\`, `..`, and control characters are rejected.
+6. **FreeDesktop Trash Support**: Trashed files are moved into `~/.local/share/Trash/files` accompanied by standard `.trashinfo` metadata files conforming to the FreeDesktop.org Trash Specification.
+
+---
 
 ## Requirements
 
-- Linux
-- Python 3.10 or newer (for running from source or building)
-- A working Tkinter installation (on some Linux distributions this may
-  require installing `python3-tk` separately)
+- **Operating System**: Linux (X11 or Wayland)
+- **Python**: 3.10, 3.11, 3.12, or 3.13
+- **Tkinter**: `python3-tk` (installed via system package manager if not present by default)
 
-Optional, for a native folder picker:
+*Optional dependencies for native folder pickers:*
+- `zenity` (GNOME, Cinnamon, XFCE)
+- `kdialog` (KDE Plasma)
 
-- `zenity` (GNOME / GTK desktops)
-- `kdialog` (KDE desktops)
+---
 
-If neither is installed, the app falls back to a standard Tk folder
-dialog.
+## Installation & Usage
 
-## Running from source (development)
+### Running from Source (Development)
 
 ```bash
 git clone https://github.com/teppe21/File-Suite.git
 cd File-Suite
 
+# Set up virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-python3 -m pip install -r requirements.txt
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
 
+# Launch application
 python3 main.py
 ```
 
-## Building a standalone executable
+### Building a Standalone Executable
 
-File Suite can be packaged into a single-file executable with PyInstaller.
-The `build.sh` script handles the whole process in a local virtual
-environment:
+File Suite can be compiled into a single self-contained binary using PyInstaller. The included `build.sh` script automates environment isolation, packaging, and SHA-256 checksum generation:
 
 ```bash
+chmod +x build.sh
 ./build.sh
 ```
 
-This produces `dist/FileSuite`.
+This generates `dist/FileSuite` and `dist/FileSuite.sha256`.
 
-## Installing the compiled binary
+### Installing to User Desktop
 
-After `build.sh` has produced `dist/FileSuite`, run:
+To install the application into your local desktop environment (`~/.local/bin` and desktop launcher):
 
 ```bash
+chmod +x install.sh
 ./install.sh
 ```
 
-`install.sh` installs the executable into `~/.local/bin`, places the icon
-under `~/.local/share/icons`, and creates a desktop entry at
-`~/.local/share/applications/FileSuite.desktop`. No root privileges are
-required.
+Once installed, File Suite will appear in your application launcher (under System/Utilities) and can also be launched directly via `FileSuite` in your terminal.
 
-If `dist/FileSuite` is missing, `install.sh` stops and prints the command
-you need to run (`./build.sh`).
+---
 
-## Full workflow
+## Testing & Quality Assurance
+
+The project includes a comprehensive headless unit test suite covering path safety, operation plans, collision handling, duplicate hashing, and undo semantics:
 
 ```bash
-git clone https://github.com/teppe21/File-Suite.git
-cd File-Suite
+# Run all 42 unit tests
+python3 -m unittest discover -s tests -v
 
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-
-./build.sh
-./install.sh
+# Run Ruff linter and Bandit security checks
+ruff check .
 ```
 
-## Safety model
+### Continuous Integration
 
-File Suite intentionally avoids touching anything it was not asked to
-touch:
+Every push and pull request is validated through GitHub Actions across:
+- **Linting**: Ruff (PEP 8, Bugbear, Flake8, and Bandit security analysis).
+- **Matrix Testing**: Python `3.10`, `3.11`, `3.12`, and `3.13`.
+- **Packaging**: Automated PyInstaller executable build and SHA-256 verification.
 
-- Only files directly inside the selected directory are considered.
-- Subdirectories are never entered, modified, or removed.
-- Hidden files and directories (names starting with `.`) are skipped.
-- The destination subfolder for grouped files is validated: it must be a
-  single path component, cannot be `..`, cannot be absolute, cannot
-  contain path separators, and the resolved path must stay inside the
-  selected directory.
-- Existing files in a destination folder are never overwritten. New
-  names are generated by appending `_1`, `_2`, … to the stem while
-  keeping the full extension.
-- When duplicates are handled, the *first* occurrence (the "original")
-  is kept in place; only subsequent copies are moved.
-- The `Duplicates/` folder created during an operation is not scanned as
-  part of that same operation.
+---
 
-## Project structure
+## Project Structure
 
 ```
 File-Suite/
 ├── .github/
 │   └── workflows/
-│       └── tests.yml        # CI workflow (tests & linting)
-├── .gitignore
-├── LICENSE
-├── README.md
-├── build.sh                 # PyInstaller build helper
-├── core.py                  # GUI-independent helpers (validation, etc.)
-├── install.sh               # user-local installation script
-├── main.py                  # CustomTkinter application and entry point
-├── organizer.jpg            # application icon
-├── pyproject.toml           # Ruff linter configuration
-├── requirements.txt         # Python dependencies
+│       └── tests.yml        # CI test matrix (3.10-3.13), Ruff & build validation
+├── .gitignore               # Security-hardened gitignore
+├── CHANGELOG.md             # Semantic release history (Keep a Changelog)
+├── LICENSE                  # MIT License
+├── README.md                # Project documentation and architecture guide
+├── build.sh                 # PyInstaller standalone build script
+├── core.py                  # Path validation, category maps, collision renaming
+├── duplicates.py            # Background chunked SHA-256 duplicate scan engine
+├── install.sh               # XDG user-local desktop integration installer
+├── main.py                  # CustomTkinter graphite UI, view router & event loop
+├── models.py                # Dataclasses: plans, items, results, groups, progress
+├── operations.py            # Plan creation, dry-run preview, atomic moves, undo
+├── organizer.jpg            # Application desktop icon
+├── pyproject.toml           # Ruff and Bandit linter configuration
+├── requirements.txt         # Runtime dependencies
 └── tests/
-    └── test_core.py         # unit tests for core.py
+    ├── test_core.py         # Path validation & renaming tests (21 tests)
+    ├── test_duplicates.py   # Chunked hashing & cancellation tests (6 tests)
+    ├── test_models.py       # Dataclass & metric calculation tests (5 tests)
+    └── test_operations.py   # Dry-run, move execution, TOCTOU & undo tests (10 tests)
 ```
 
-## Testing
-
-The pure logic in `core.py` has unit tests that do not require a GUI:
-
-```bash
-python3 -m unittest discover -s tests
-```
-
-A quick syntax check of the main module:
-
-```bash
-python3 -m py_compile main.py
-```
+---
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.

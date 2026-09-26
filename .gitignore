@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -19,4 +20,24 @@ dist/
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 .DS_Store
+
+# Secrets & Credentials protection
+.env
+.env.*
+!.env.example
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.cert
+*.crt
+
+# Local logs and test dumps
+*.log
+local_logs/
+scratch/

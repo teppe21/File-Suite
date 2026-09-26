@@ -16,7 +16,13 @@ select = [
     "W",
     "UP",
     "B",
+    "S",
 ]
 ignore = [
     "E501",
+    "S603",  # Subprocess call with validated arguments
+    "S607",  # Starting process with a partial path (zenity / kdialog detection)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S108"]  # Asserts and mock /tmp paths in unit tests

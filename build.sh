@@ -9,7 +9,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+VERSION="1.1.0"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+echo "=========================================="
+echo " Building File Suite v${VERSION}"
+echo "=========================================="
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     echo "Error: '$PYTHON_BIN' was not found in PATH." >&2
@@ -28,7 +33,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install "pyinstaller>=6,<7"
 
-echo "Building FileSuite with PyInstaller..."
+echo "Building FileSuite executable with PyInstaller..."
 pyinstaller \
     --noconfirm \
     --clean \
@@ -44,5 +49,11 @@ if [ ! -f "dist/FileSuite" ]; then
     exit 1
 fi
 
-echo "Build complete: dist/FileSuite"
-echo "You can now run ./install.sh"
+# Generate SHA-256 checksum for release verification
+(cd dist && sha256sum FileSuite > FileSuite.sha256)
+
+echo "=========================================="
+echo " Build complete: dist/FileSuite"
+echo " SHA-256: $(cat dist/FileSuite.sha256)"
+echo " You can now run: ./install.sh"
+echo "=========================================="
