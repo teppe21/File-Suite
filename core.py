@@ -5,8 +5,8 @@ Anything that does not need CustomTkinter or the filesystem UI lives here
 so it can be unit-tested without launching a window.
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 # ---------------------------------------------------------------------------

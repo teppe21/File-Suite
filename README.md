@@ -22,6 +22,9 @@ left untouched.
   Media, Installers & Code) or a single user-defined subfolder.
 - Find byte-identical files using SHA-256 hashing (64 KB chunks, memory
   friendly). Files whose sizes differ are skipped before hashing.
+- Duplicate scanning runs on a background thread; the GUI stays
+  responsive even on large directories, with a progress bar and console
+  updates tracking scan progress.
 - Choose what happens to duplicates: move them into a `Duplicates/`
   subfolder, or send them to the freedesktop trash
   (`~/.local/share/Trash/`).

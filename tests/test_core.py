@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 # Make `core` importable when running from the project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import (  # noqa: E402
+from core import (  # noqa: E402, I001
     build_collision_safe_path,
     collect_selected_extensions,
     normalize_extension,

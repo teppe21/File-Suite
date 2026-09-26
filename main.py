@@ -1,13 +1,14 @@
 import datetime
 import hashlib
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.parse
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 
 from core import (
@@ -140,7 +141,26 @@ class FileOrganizerApp(ctk.CTk):
 
         self.cat_vars = {cat: ctk.BooleanVar(value=True) for cat in CATEGORIES}
 
+        self._is_scanning = False
+        self._is_closing = False
+        self._cancel_scan = threading.Event()
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+
         self._build_ui()
+
+    def _on_closing(self):
+        """Handle window close gracefully, cancelling background tasks."""
+        self._is_closing = True
+        self._cancel_scan.set()
+        self.destroy()
+
+    def _safe_after(self, func, *args):
+        """Schedule func(*args) on main thread if window is still active."""
+        if not self._is_closing:
+            try:
+                self.after(0, func, *args)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Window icon
@@ -262,13 +282,21 @@ class FileOrganizerApp(ctk.CTk):
         dup_card.grid(row=3, column=0, padx=24, pady=6, sticky="ew")
         dup_card.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkButton(
+        self.find_dup_btn = ctk.CTkButton(
             dup_card, text="🔍 Find Duplicates in Root Directory",
             height=38, corner_radius=8,
             font=ctk.CTkFont(size=13, weight="bold"),
             command=self.find_duplicates,
             fg_color="#059669", hover_color="#047857",
-        ).grid(row=0, column=0, padx=16, pady=10, sticky="ew")
+        )
+        self.find_dup_btn.grid(row=0, column=0, padx=16, pady=10, sticky="ew")
+
+        self.progress_bar = ctk.CTkProgressBar(
+            dup_card, height=6, corner_radius=3, progress_color="#059669",
+        )
+        self.progress_bar.set(0)
+        self.progress_bar.grid(row=1, column=0, padx=16, pady=(0, 10), sticky="ew")
+        self.progress_bar.grid_remove()
 
         # Log
         log_card = ctk.CTkFrame(self, corner_radius=12)
@@ -433,6 +461,8 @@ class FileOrganizerApp(ctk.CTk):
         sha256 = hashlib.sha256()
         with open(file_path, "rb") as fh:
             while chunk := fh.read(64 * 1024):
+                if self._cancel_scan.is_set():
+                    return ""
                 sha256.update(chunk)
         return sha256.hexdigest()
 
@@ -465,50 +495,145 @@ class FileOrganizerApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def find_duplicates(self):
+        if self._is_scanning:
+            return
+
         target_dir = self.current_path
 
         if not target_dir.exists() or not target_dir.is_dir():
             self.log("[ERROR] The selected target directory does not exist!")
             return
 
+        self._is_scanning = True
+        self._cancel_scan.clear()
+        self.find_dup_btn.configure(state="disabled")
+        self.progress_bar.set(0)
+        self.progress_bar.grid()
+
         self.log(f"\n--- SCANNING FOR DUPLICATES: {target_dir} ---")
 
-        files = [
-            f for f in target_dir.iterdir()
-            if f.is_file() and not f.name.startswith(".")
-        ]
+        worker = threading.Thread(
+            target=self._scan_duplicates_worker,
+            args=(target_dir,),
+            daemon=True,
+        )
+        worker.start()
 
-        if not files:
-            self.log("No valid files found in the root folder to process.")
+    def _reset_scan_ui(self):
+        self._is_scanning = False
+        if not self._is_closing and self.winfo_exists():
+            self.find_dup_btn.configure(state="normal")
+            self.progress_bar.set(0)
+            self.progress_bar.grid_remove()
+
+    def _on_scan_progress(self, current: int, total: int):
+        if self._is_closing or not self.winfo_exists():
             return
+        if total > 0:
+            self.progress_bar.set(current / total)
+        if total <= 50 or current % max(1, total // 10) == 0 or current == total:
+            self.log(f"Scanning... ({current}/{total})")
 
-        # Stage 1: group by size. Only groups with >= 2 members need hashing.
-        size_groups = group_by_size(files)
-        candidate_files = [f for group in size_groups.values() if len(group) >= 2 for f in group]
-
-        if not candidate_files:
-            self.log("No duplicate files detected.")
+    def _on_scan_empty(self, message: str):
+        if self._is_closing or not self.winfo_exists():
             return
+        self._reset_scan_ui()
+        self.log(message)
 
-        # Stage 2: hash candidates.
-        hashes: dict[str, Path] = {}
-        duplicates: list[tuple[Path, Path]] = []
+    def _on_scan_error(self, message: str):
+        if self._is_closing or not self.winfo_exists():
+            return
+        self._reset_scan_ui()
+        self.log(f"[ERROR] {message}")
 
-        for file in candidate_files:
+    def _scan_duplicates_worker(self, target_dir: Path):
+        try:
+            if self._cancel_scan.is_set():
+                return
+
             try:
-                file_hash = self._calculate_sha256(file)
+                files = [
+                    f for f in target_dir.iterdir()
+                    if f.is_file() and not f.name.startswith(".")
+                ]
             except OSError as exc:
-                self.log(f"[ERROR] Could not read {file.name}: {exc}")
-                continue
+                self._safe_after(
+                    self._on_scan_error, f"Could not list directory: {exc}"
+                )
+                return
 
-            if file_hash in hashes:
-                duplicates.append((file, hashes[file_hash]))
-            else:
-                hashes[file_hash] = file
+            if self._cancel_scan.is_set():
+                return
 
-        if not duplicates:
-            self.log("No duplicate files detected.")
+            if not files:
+                self._safe_after(
+                    self._on_scan_empty,
+                    "No valid files found in the root folder to process.",
+                )
+                return
+
+            # Stage 1: group by size. Only groups with >= 2 members need hashing.
+            size_groups = group_by_size(files)
+            candidate_files = [
+                f for group in size_groups.values() if len(group) >= 2 for f in group
+            ]
+
+            if not candidate_files:
+                self._safe_after(
+                    self._on_scan_empty, "No duplicate files detected."
+                )
+                return
+
+            total_candidates = len(candidate_files)
+
+            # Stage 2: hash candidates.
+            hashes: dict[str, Path] = {}
+            duplicates: list[tuple[Path, Path]] = []
+
+            for idx, file in enumerate(candidate_files, 1):
+                if self._cancel_scan.is_set():
+                    return
+
+                self._safe_after(self._on_scan_progress, idx, total_candidates)
+
+                try:
+                    file_hash = self._calculate_sha256(file)
+                except OSError as exc:
+                    self._safe_after(
+                        self.log, f"[ERROR] Could not read {file.name}: {exc}"
+                    )
+                    continue
+
+                if self._cancel_scan.is_set():
+                    return
+
+                if file_hash in hashes:
+                    duplicates.append((file, hashes[file_hash]))
+                else:
+                    hashes[file_hash] = file
+
+            if self._cancel_scan.is_set():
+                return
+
+            if not duplicates:
+                self._safe_after(
+                    self._on_scan_empty, "No duplicate files detected."
+                )
+                return
+
+            self._safe_after(self._on_scan_success, duplicates, target_dir)
+
+        except Exception as exc:
+            self._safe_after(
+                self._on_scan_error, f"Unexpected error during scan: {exc}"
+            )
+
+    def _on_scan_success(
+        self, duplicates: list[tuple[Path, Path]], target_dir: Path
+    ):
+        if self._is_closing or not self.winfo_exists():
             return
+        self._reset_scan_ui()
 
         self.log(f"Found {len(duplicates)} duplicate file(s):")
         for dup_file, orig_file in duplicates:
@@ -521,6 +646,9 @@ class FileOrganizerApp(ctk.CTk):
 
         dialog = DuplicateActionDialog(self, len(duplicates))
         self.wait_window(dialog)
+
+        if self._is_closing or not self.winfo_exists():
+            return
 
         if dialog.action == "folder":
             dup_folder = target_dir / "Duplicates"
@@ -537,9 +665,13 @@ class FileOrganizerApp(ctk.CTk):
                 except OSError as exc:
                     self.log(f"[ERROR] Could not move {dup_file.name}: {exc}")
                     continue
-                self.log(f"[ISOLATED] {dup_file.name} ➔ Duplicates/{dest_path.name}")
+                self.log(
+                    f"[ISOLATED] {dup_file.name} ➔ Duplicates/{dest_path.name}"
+                )
 
-            self.log("--- Duplicates moved to 'Duplicates' folder successfully. ---\n")
+            self.log(
+                "--- Duplicates moved to 'Duplicates' folder successfully. ---\n"
+            )
 
         elif dialog.action == "trash":
             for dup_file, _ in duplicates:
