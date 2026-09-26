@@ -8,7 +8,6 @@ so it can be unit-tested without launching a window.
 import re
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # File categories
 # ---------------------------------------------------------------------------

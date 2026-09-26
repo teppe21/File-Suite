@@ -136,6 +136,9 @@ touch:
 
 ```
 File-Suite/
+├── .github/
+│   └── workflows/
+│       └── tests.yml        # CI workflow (tests & linting)
 ├── .gitignore
 ├── LICENSE
 ├── README.md
@@ -144,6 +147,7 @@ File-Suite/
 ├── install.sh               # user-local installation script
 ├── main.py                  # CustomTkinter application and entry point
 ├── organizer.jpg            # application icon
+├── pyproject.toml           # Ruff linter configuration
 ├── requirements.txt         # Python dependencies
 └── tests/
     └── test_core.py         # unit tests for core.py

@@ -20,7 +20,6 @@ from core import (
     resolve_destination,
 )
 
-
 # ---------------------------------------------------------------------------
 # Path helpers (works both from source and from a PyInstaller bundle)
 # ---------------------------------------------------------------------------
