@@ -10,11 +10,12 @@ A robust, portfolio-ready Linux desktop utility for organizing files and finding
 
 File Suite is built around a strict safety philosophy: **preview before mutation, zero data loss, and explicit user control**. It operates deterministically on loose files in the chosen target folder without descending into nested subdirectories or modifying hidden files.
 
-<p align="center">
-  <img width="855" height="743" alt="File Suite Interface" src="https://github.com/user-attachments/assets/7dedf785-0935-4aad-81ed-2f11cd3f8917" />
-  <br/>
-  <img width="421" height="272" alt="Duplicate Manager" src="https://github.com/user-attachments/assets/7ce58a2e-55c4-4999-b188-f4dac8106459" />
-</p>
+<img width="901" height="749" alt="Screenshot From 2026-09-26 23-15-08" src="https://github.com/user-attachments/assets/628b7b11-3fe2-494d-a28a-b51b5ac00b03" />
+<img width="901" height="749" alt="Screenshot From 2026-09-26 23-15-25" src="https://github.com/user-attachments/assets/fb87ef58-e735-4b3f-9b5e-d8e6e058ff35" />
+<img width="901" height="749" alt="Screenshot From 2026-09-26 23-15-30" src="https://github.com/user-attachments/assets/7fb8afcd-5b4a-45a9-9aa2-607acfadbb81" />
+
+
+
 
 ---
 
