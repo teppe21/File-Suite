@@ -403,7 +403,7 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
             continue
 
         try:
-            resolved_orig_parent = orig_parent.resolve(strict=True)
+            resolved_orig_parent = orig_parent.resolve(strict=False)
             if not resolved_orig_parent.is_relative_to(resolved_root):
                 failed_count += 1
                 errors.append(f"Cannot restore '{current_loc.name}': original location escapes root directory.")
@@ -425,6 +425,12 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
 
         try:
             target_restore.parent.mkdir(parents=True, exist_ok=True)
+            resolved_restore_parent = target_restore.parent.resolve(strict=True)
+            if not resolved_restore_parent.is_relative_to(resolved_root):
+                failed_count += 1
+                errors.append(f"Cannot restore '{current_loc.name}': restored parent directory escapes root.")
+                retained_moves.append(record)
+                continue
             shutil.move(str(current_loc), str(target_restore))
             undone_count += 1
         except OSError as exc:
@@ -501,22 +507,67 @@ def build_duplicate_move_plan(
     """
     Build an OperationPlan for moving selected duplicate files into a subfolder.
 
-    Allows duplicate isolation to be previewed and undone using the unified engine.
+    Enforces safety invariants:
+      - Validates destination subfolder name and ensures it does not escape target_dir.
+      - Enforces source root containment within target_dir.
+      - Strictly ignores symbolic links and non-regular files.
+      - Rejects sources that are already located inside the duplicate destination folder.
+      - Tracks allocated destinations to avoid intra-batch collisions.
+
+    Returns:
+      (success: bool, plan: OperationPlan, error_message: str | None)
     """
-    dup_folder = target_dir / subfolder_name
+    if not target_dir.exists() or not target_dir.is_dir():
+        return False, OperationPlan(target_dir=target_dir), "Target directory does not exist or is not a directory."
+
+    ok, res = resolve_destination(target_dir, subfolder_name)
+    if not ok:
+        return False, OperationPlan(target_dir=target_dir), str(res)
+
+    dup_folder: Path = res  # type: ignore[assignment]
+
+    try:
+        target_dir_resolved = target_dir.resolve(strict=True)
+    except OSError as exc:
+        return False, OperationPlan(target_dir=target_dir), f"Target directory is inaccessible: {exc}"
+
+    dup_folder_resolved = dup_folder.resolve(strict=False)
+
     plan = OperationPlan(target_dir=target_dir)
+    planned_destinations: set[Path] = set()
 
     for f in duplicates:
         if not f.exists() or f.is_symlink() or not f.is_file():
             continue
 
         try:
+            f_resolved = f.resolve(strict=True)
+            # Enforce source containment inside target_dir
+            if not f_resolved.is_relative_to(target_dir_resolved):
+                continue
+            # Reject sources already inside the duplicate destination folder
+            if f_resolved.is_relative_to(dup_folder_resolved):
+                continue
             size = f.stat().st_size
         except OSError:
-            size = 0
+            continue
 
-        final_dest = build_collision_safe_path(dup_folder, f.name)
-        is_collision = (dup_folder / f.name).exists()
+        candidate_dest = dup_folder / f.name
+        is_collision = candidate_dest.exists() or candidate_dest in planned_destinations
+
+        final_dest = (
+            build_collision_safe_path(dup_folder, f.name)
+            if is_collision
+            else candidate_dest
+        )
+        while (
+            final_dest in planned_destinations
+            or final_dest.exists()
+            or final_dest.is_symlink()
+        ):
+            final_dest = build_collision_safe_path(dup_folder, final_dest.name)
+
+        planned_destinations.add(final_dest)
 
         plan.items.append(
             OperationItem(

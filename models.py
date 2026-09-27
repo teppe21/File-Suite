@@ -151,9 +151,8 @@ class DuplicateGroup:
     @property
     def reclaimable_bytes(self) -> int:
         """
-        Estimate physical disk space reclaimed if non-original files are removed.
-        Accounts for hard links: multiple links to the same underlying inode
-        or links to the preserved original do not yield duplicate block reclaim.
+        Estimate logical disk space reclaimed if non-original duplicate files are removed.
+        Accounts for shared hard links (inodes); based on logical file size.
         """
         if len(self.files) <= 1:
             return 0
@@ -192,3 +191,48 @@ class ScanProgress:
     files_skipped: int = 0
     groups_found: int = 0
     message: str = ""
+
+
+def select_all_duplicates(groups: list[DuplicateGroup]) -> None:
+    """Select all non-original duplicate files across groups; preserved originals remain unselected."""
+    for group in groups:
+        for f in group.files:
+            f.selected = not f.is_original
+
+
+def clear_duplicate_selection(groups: list[DuplicateGroup]) -> None:
+    """Deselect all files across all duplicate groups."""
+    for group in groups:
+        for f in group.files:
+            f.selected = False
+
+
+def update_duplicate_groups_after_removal(
+    groups: list[DuplicateGroup], removed_paths: set[Path]
+) -> list[DuplicateGroup]:
+    """
+    Remove successfully processed files from duplicate groups.
+    Preserves unaffected duplicate groups and files.
+    A group is pruned only if fewer than 2 copies remain (i.e. no duplicates left).
+    """
+    if not removed_paths:
+        return groups
+
+    updated_groups: list[DuplicateGroup] = []
+    canonical_removed = {p.resolve() for p in removed_paths}
+
+    for group in groups:
+        remaining_files = [
+            f for f in group.files if f.path.resolve() not in canonical_removed
+        ]
+        # A duplicate group only exists if at least 2 identical files remain
+        if len(remaining_files) >= 2:
+            # Ensure there is an original marked
+            if not any(f.is_original for f in remaining_files):
+                remaining_files[0].is_original = True
+                remaining_files[0].selected = False
+            group.files = remaining_files
+            updated_groups.append(group)
+
+    return updated_groups
+

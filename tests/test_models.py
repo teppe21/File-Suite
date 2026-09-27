@@ -17,6 +17,9 @@ from models import (
     OperationStatus,
     OperationType,
     ScanProgress,
+    clear_duplicate_selection,
+    select_all_duplicates,
+    update_duplicate_groups_after_removal,
 )
 
 
@@ -91,6 +94,45 @@ class ModelsTests(unittest.TestCase):
         self.assertEqual(group.selected_duplicates[0], f_dup1)
         # 2 duplicates * 1024 = 2048 bytes
         self.assertEqual(group.reclaimable_bytes, 2048)
+
+    def test_select_all_duplicates_preserves_originals(self):
+        f_orig = DuplicateFile(path=Path("/tmp/orig.jpg"), size=100, is_original=True, selected=False)
+        f_dup1 = DuplicateFile(path=Path("/tmp/dup1.jpg"), size=100, is_original=False, selected=False)
+        f_dup2 = DuplicateFile(path=Path("/tmp/dup2.jpg"), size=100, is_original=False, selected=False)
+        group = DuplicateGroup(group_id="1", sha256="hash", size=100, files=[f_orig, f_dup1, f_dup2])
+
+        select_all_duplicates([group])
+        self.assertFalse(f_orig.selected, "Preserved original must remain unselected")
+        self.assertTrue(f_dup1.selected)
+        self.assertTrue(f_dup2.selected)
+
+        clear_duplicate_selection([group])
+        self.assertFalse(f_orig.selected)
+        self.assertFalse(f_dup1.selected)
+        self.assertFalse(f_dup2.selected)
+
+    def test_update_duplicate_groups_after_removal(self):
+        p1 = Path("/tmp/f1.txt")
+        p2 = Path("/tmp/f2.txt")
+        p3 = Path("/tmp/f3.txt")
+        f1 = DuplicateFile(path=p1, size=50, is_original=True, selected=False)
+        f2 = DuplicateFile(path=p2, size=50, is_original=False, selected=True)
+        f3 = DuplicateFile(path=p3, size=50, is_original=False, selected=False)
+        group = DuplicateGroup(group_id="g1", sha256="h1", size=50, files=[f1, f2, f3])
+
+        # Remove f2: 2 files remain, group remains
+        updated = update_duplicate_groups_after_removal([group], {p2})
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(len(updated[0].files), 2)
+        self.assertEqual([f.path for f in updated[0].files], [p1, p3])
+
+        # Remove f1 (the original): only f3 remains (< 2 files), group pruned entirely
+        updated2 = update_duplicate_groups_after_removal(updated, {p1})
+        self.assertEqual(len(updated2), 0)
+
+        # Empty removal does not alter groups
+        updated_empty = update_duplicate_groups_after_removal([group], set())
+        self.assertEqual(len(updated_empty), 1)
 
     def test_scan_progress(self):
         prog = ScanProgress(step="Scanning", current=5, total=20, files_discovered=25)

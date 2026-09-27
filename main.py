@@ -29,6 +29,9 @@ from models import (
     ExecutionResult,
     OperationPlan,
     ScanProgress,
+    clear_duplicate_selection,
+    select_all_duplicates,
+    update_duplicate_groups_after_removal,
 )
 from operations import (
     build_duplicate_move_plan,
@@ -97,11 +100,13 @@ class FileOrganizerApp(ctk.CTk):
         self._is_scanning: bool = False
         self._is_executing: bool = False
         self._is_closing: bool = False
+        self._scan_generation: int = 0
         self._cancel_scan: threading.Event = threading.Event()
 
         self.current_plan: OperationPlan | None = None
         self.last_execution_result: ExecutionResult | None = None
         self.duplicate_groups: list[DuplicateGroup] = []
+        self.duplicate_scan_dir: Path | None = None
 
         # Form variables
         self.cat_vars: dict[str, ctk.BooleanVar] = {
@@ -577,43 +582,51 @@ class FileOrganizerApp(ctk.CTk):
         )
 
     def _apply_organization_plan(self):
+        if self._is_executing:
+            return
         if not self.current_plan or self.current_plan.affected_count == 0:
             return
 
-        self.set_status("PROCESSING", "Executing file moves...", THEME["accent"])
-        self.log("INFO", f"Applying organization plan ({self.current_plan.affected_count} files)...")
+        self._is_executing = True
+        try:
+            self.set_status("PROCESSING", "Executing file moves...", THEME["accent"])
+            self.log("INFO", f"Applying organization plan ({self.current_plan.affected_count} files)...")
 
-        result = execute_operation_plan(self.current_plan)
-        self.last_execution_result = result
-        self._update_undo_button_state()
+            result = execute_operation_plan(self.current_plan)
+            self.last_execution_result = result
+            self._update_undo_button_state()
 
-        if result.success_count > 0:
-            self.log(
-                "SUCCESS",
-                f"Successfully moved {result.success_count} file(s) into category subfolders.",
+            if result.success_count > 0:
+                self.log(
+                    "SUCCESS",
+                    f"Successfully moved {result.success_count} file(s) into category subfolders.",
+                )
+
+            if result.failure_count > 0:
+                self.log("ERROR", f"{result.failure_count} file(s) could not be moved.")
+                for src, _, err in result.failed_moves:
+                    self.log("ERROR", f"  Failed: {src.name} — {err}")
+                messagebox.showwarning(
+                    "Partial Execution",
+                    f"What happened:\n{result.success_count} file(s) were organized, but {result.failure_count} encountered errors.\n\n"
+                    "Why:\nOne or more files were modified, locked, or moved prior to execution.\n\n"
+                    "Next steps:\nCheck the Activity Log tab for detailed per-file diagnostics.",
+                )
+
+            self.set_status(
+                "COMPLETED",
+                f"Finished: {result.success_count} organized, {result.failure_count} failed.",
+                THEME["success"] if result.failure_count == 0 else THEME["warning"],
             )
 
-        if result.failure_count > 0:
-            self.log("ERROR", f"{result.failure_count} file(s) could not be moved.")
-            for src, _, err in result.failed_moves:
-                self.log("ERROR", f"  Failed: {src.name} — {err}")
-            messagebox.showwarning(
-                "Partial Execution",
-                f"What happened:\n{result.success_count} file(s) were organized, but {result.failure_count} encountered errors.\n\n"
-                "Why:\nOne or more files were modified, locked, or moved prior to execution.\n\n"
-                "Next steps:\nCheck the Activity Log tab for detailed per-file diagnostics.",
-            )
-
-        self.set_status(
-            "COMPLETED",
-            f"Finished: {result.success_count} organized, {result.failure_count} failed.",
-            THEME["success"] if result.failure_count == 0 else THEME["warning"],
-        )
-
-        # Reset preview area
-        self._show_organize_view()
+            # Reset preview area
+            self._show_organize_view()
+        finally:
+            self._is_executing = False
 
     def _execute_undo(self):
+        if self._is_executing:
+            return
         if not self.last_execution_result or self.last_execution_result.success_count == 0:
             return
 
@@ -624,29 +637,33 @@ class FileOrganizerApp(ctk.CTk):
         ):
             return
 
-        self.set_status("PROCESSING", "Undoing file moves...", THEME["accent"])
-        undone, failed, errors = undo_last_operation(res)
+        self._is_executing = True
+        try:
+            self.set_status("PROCESSING", "Undoing file moves...", THEME["accent"])
+            undone, failed, errors = undo_last_operation(res)
 
-        self._update_undo_button_state()
+            self._update_undo_button_state()
 
-        if undone > 0:
-            self.log("SUCCESS", f"Undo completed: restored {undone} file(s) to original location.")
-        if failed > 0:
-            self.log("ERROR", f"Undo encountered {failed} error(s).")
-            for err in errors:
-                self.log("ERROR", f"  {err}")
-            messagebox.showwarning(
-                "Undo Finished with Errors",
-                f"What happened:\n{undone} file(s) were restored, but {failed} could not be restored.\n\n"
-                "Why:\nOriginal locations may be occupied by newly created files, or destination files were modified.\n\n"
-                "Next steps:\nReview the Activity Log tab for details on un-restored items.",
+            if undone > 0:
+                self.log("SUCCESS", f"Undo completed: restored {undone} file(s) to original location.")
+            if failed > 0:
+                self.log("ERROR", f"Undo encountered {failed} error(s).")
+                for err in errors:
+                    self.log("ERROR", f"  {err}")
+                messagebox.showwarning(
+                    "Undo Finished with Errors",
+                    f"What happened:\n{undone} file(s) were restored, but {failed} could not be restored.\n\n"
+                    "Why:\nOriginal locations may be occupied by newly created files, or destination files were modified.\n\n"
+                    "Next steps:\nReview the Activity Log tab for details on un-restored items.",
+                )
+
+            self.set_status(
+                "COMPLETED",
+                f"Undo complete: {undone} restored, {failed} failed.",
+                THEME["success"] if failed == 0 else THEME["danger"],
             )
-
-        self.set_status(
-            "COMPLETED",
-            f"Undo complete: {undone} restored, {failed} failed.",
-            THEME["success"] if failed == 0 else THEME["danger"],
-        )
+        finally:
+            self._is_executing = False
 
     # ------------------------------------------------------------------
     # View 2: Duplicate Finder
@@ -732,7 +749,7 @@ class FileOrganizerApp(ctk.CTk):
         self._render_duplicate_groups()
 
     def _start_duplicate_scan(self):
-        if self._is_scanning:
+        if self._is_scanning or self._is_executing:
             return
 
         if not self.current_path.exists() or not self.current_path.is_dir():
@@ -741,6 +758,9 @@ class FileOrganizerApp(ctk.CTk):
 
         self._is_scanning = True
         self._cancel_scan.clear()
+        self._scan_generation += 1
+        current_gen = self._scan_generation
+        target_dir = self.current_path
 
         self.scan_dup_btn.configure(state="disabled")
         self.cancel_scan_btn.configure(state="normal")
@@ -752,7 +772,7 @@ class FileOrganizerApp(ctk.CTk):
 
         worker = threading.Thread(
             target=self._duplicate_scan_worker,
-            args=(self.current_path,),
+            args=(target_dir, current_gen),
             daemon=True,
         )
         worker.start()
@@ -764,20 +784,39 @@ class FileOrganizerApp(ctk.CTk):
             self.set_status("CANCELLED", "Cancelling scan...", THEME["warning"])
             self.log("WARN", "User requested duplicate scan cancellation.")
 
-    def _duplicate_scan_worker(self, target_dir: Path):
+    def _duplicate_scan_worker(self, target_dir: Path, gen: int):
         def on_prog(progress: ScanProgress):
-            self._safe_after(self._on_duplicate_scan_progress, progress)
+            self._safe_after(self._on_duplicate_scan_progress, progress, gen)
 
-        groups = scan_duplicates(
-            target_dir=target_dir,
-            cancel_event=self._cancel_scan,
-            on_progress=on_prog,
-        )
+        try:
+            groups = scan_duplicates(
+                target_dir=target_dir,
+                cancel_event=self._cancel_scan,
+                on_progress=on_prog,
+            )
+            self._safe_after(self._on_duplicate_scan_complete, groups, target_dir, gen)
+        except Exception as exc:
+            self._safe_after(self._on_duplicate_scan_error, str(exc), gen)
 
-        self._safe_after(self._on_duplicate_scan_complete, groups)
-
-    def _on_duplicate_scan_progress(self, progress: ScanProgress):
+    def _on_duplicate_scan_error(self, err_msg: str, gen: int):
         if self._is_closing or not self.winfo_exists():
+            return
+        if gen != self._scan_generation:
+            return
+
+        self._is_scanning = False
+        self.scan_dup_btn.configure(state="normal")
+        self.cancel_scan_btn.configure(state="disabled")
+        self.dup_progress_bar.grid_remove()
+
+        self.set_status("ERROR", "Duplicate scan failed.", THEME["danger"])
+        self.dup_progress_label.configure(text=f"Scan error: {err_msg}")
+        self.log("ERROR", f"Duplicate scan failed: {err_msg}")
+
+    def _on_duplicate_scan_progress(self, progress: ScanProgress, gen: int):
+        if self._is_closing or not self.winfo_exists():
+            return
+        if gen != self._scan_generation:
             return
 
         if progress.total > 0:
@@ -788,11 +827,16 @@ class FileOrganizerApp(ctk.CTk):
             text=f"{progress.step} — Processed: {progress.files_processed}/{progress.total} | Groups: {progress.groups_found}"
         )
 
-    def _on_duplicate_scan_complete(self, groups: list[DuplicateGroup]):
+    def _on_duplicate_scan_complete(self, groups: list[DuplicateGroup], target_dir: Path, gen: int):
         if self._is_closing or not self.winfo_exists():
             return
 
+        if gen != self._scan_generation or target_dir.resolve() != self.current_path.resolve():
+            # Discard results from a stale scan generation or directory switch
+            return
+
         self._is_scanning = False
+        self.duplicate_scan_dir = target_dir
         self.scan_dup_btn.configure(state="normal")
         self.cancel_scan_btn.configure(state="disabled")
         self.dup_progress_bar.grid_remove()
@@ -845,7 +889,7 @@ class FileOrganizerApp(ctk.CTk):
 
         ctk.CTkButton(
             toolbar,
-            text="Select All Duplicates",
+            text="Select Duplicates",
             height=28,
             corner_radius=4,
             font=ctk.CTkFont(size=11),
@@ -854,19 +898,6 @@ class FileOrganizerApp(ctk.CTk):
             border_width=1,
             border_color=THEME["border"],
             command=self._select_all_duplicates,
-        ).pack(side="left", padx=(0, 6))
-
-        ctk.CTkButton(
-            toolbar,
-            text="Keep Originals Only",
-            height=28,
-            corner_radius=4,
-            font=ctk.CTkFont(size=11),
-            fg_color=THEME["surface_card"],
-            hover_color=THEME["surface_hover"],
-            border_width=1,
-            border_color=THEME["border"],
-            command=self._select_originals_only,
         ).pack(side="left", padx=(0, 6))
 
         ctk.CTkButton(
@@ -973,22 +1004,16 @@ class FileOrganizerApp(ctk.CTk):
                     ).pack(side="left")
 
     def _select_all_duplicates(self):
-        for group in self.duplicate_groups:
-            for f in group.files:
-                f.selected = True
+        select_all_duplicates(self.duplicate_groups)
         self._render_duplicate_groups()
 
     def _select_originals_only(self):
         """Keep original preserved (unselected), select all redundant copies."""
-        for group in self.duplicate_groups:
-            for f in group.files:
-                f.selected = not f.is_original
+        select_all_duplicates(self.duplicate_groups)
         self._render_duplicate_groups()
 
     def _clear_selection(self):
-        for group in self.duplicate_groups:
-            for f in group.files:
-                f.selected = False
+        clear_duplicate_selection(self.duplicate_groups)
         self._render_duplicate_groups()
 
     def _get_selected_duplicate_paths(self) -> list[Path]:
@@ -1000,6 +1025,20 @@ class FileOrganizerApp(ctk.CTk):
         return selected
 
     def _move_selected_duplicates(self):
+        if self._is_executing:
+            return
+
+        if (
+            self.duplicate_scan_dir is None
+            or self.duplicate_scan_dir.resolve() != self.current_path.resolve()
+        ):
+            messagebox.showerror(
+                "Mismatched Directory",
+                "Target folder has changed since the duplicate scan was performed. "
+                "Please re-scan the current folder before isolating duplicates.",
+            )
+            return
+
         selected = self._get_selected_duplicate_paths()
         if not selected:
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to isolate.")
@@ -1011,26 +1050,67 @@ class FileOrganizerApp(ctk.CTk):
         ):
             return
 
-        ok, plan, err = build_duplicate_move_plan(selected, self.current_path, "Duplicates")
-        if not ok:
-            messagebox.showerror("Error", err or "Failed to build move plan")
-            return
+        self._is_executing = True
+        try:
+            ok, plan, err = build_duplicate_move_plan(selected, self.current_path, "Duplicates")
+            if not ok:
+                messagebox.showerror("Error", err or "Failed to build move plan")
+                return
 
-        result = execute_operation_plan(plan)
-        self.last_execution_result = result
-        self._update_undo_button_state()
+            result = execute_operation_plan(plan)
+            self.last_execution_result = result
+            self._update_undo_button_state()
 
-        self.log(
-            "SUCCESS",
-            f"Moved {result.success_count} duplicate file(s) into 'Duplicates/' folder (Undo supported).",
-        )
-        self.set_status("COMPLETED", f"Isolated {result.success_count} duplicate(s).", THEME["success"])
+            if result.success_count > 0:
+                self.log(
+                    "SUCCESS",
+                    f"Moved {result.success_count} duplicate file(s) into 'Duplicates/' folder (Undo supported).",
+                )
 
-        # Re-run quick scan or remove isolated files from view
-        self.duplicate_groups.clear()
-        self._render_duplicate_groups()
+            if result.failure_count > 0:
+                self.log("ERROR", f"{result.failure_count} duplicate file(s) could not be moved.")
+                for src, _, err_msg in result.failed_moves:
+                    self.log("ERROR", f"  Failed: {src.name} — {err_msg}")
+                messagebox.showwarning(
+                    "Partial Duplicate Isolation",
+                    f"What happened:\n{result.success_count} file(s) moved, but {result.failure_count} failed.\n\n"
+                    "Why:\nOne or more files were modified, locked, or removed externally.\n\n"
+                    "Next steps:\nCheck the Activity Log tab for detailed diagnostics.",
+                )
+
+            status_msg = f"Isolated {result.success_count} duplicate(s)."
+            if result.failure_count > 0:
+                status_msg += f" ({result.failure_count} failed)"
+            self.set_status(
+                "COMPLETED",
+                status_msg,
+                THEME["success"] if result.failure_count == 0 else THEME["warning"],
+            )
+
+            # Update duplicate model preserving unaffected groups
+            successful_paths = {r.source for r in result.successful_moves}
+            self.duplicate_groups = update_duplicate_groups_after_removal(
+                self.duplicate_groups, successful_paths
+            )
+            self._render_duplicate_groups()
+        finally:
+            self._is_executing = False
 
     def _trash_selected_duplicates(self):
+        if self._is_executing:
+            return
+
+        if (
+            self.duplicate_scan_dir is None
+            or self.duplicate_scan_dir.resolve() != self.current_path.resolve()
+        ):
+            messagebox.showerror(
+                "Mismatched Directory",
+                "Target folder has changed since the duplicate scan was performed. "
+                "Please re-scan the current folder before trashing duplicates.",
+            )
+            return
+
         selected = self._get_selected_duplicate_paths()
         if not selected:
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to trash.")
@@ -1042,35 +1122,47 @@ class FileOrganizerApp(ctk.CTk):
         ):
             return
 
-        success_count = 0
-        failed_count = 0
+        self._is_executing = True
+        try:
+            successful_paths: set[Path] = set()
+            failed_count = 0
 
-        for f in selected:
-            ok, err = move_to_system_trash(f)
-            if ok:
-                success_count += 1
-                self.log("INFO", f"Trashed duplicate: {f.name}")
-            else:
-                failed_count += 1
-                self.log("ERROR", f"Could not trash {f.name}: {err}")
+            for f in selected:
+                ok, err = move_to_system_trash(f)
+                if ok:
+                    successful_paths.add(f)
+                    self.log("INFO", f"Trashed duplicate: {f.name}")
+                else:
+                    failed_count += 1
+                    self.log("ERROR", f"Could not trash {f.name}: {err}")
 
-        # Trash operations cannot be cleanly undone from session history
-        self.last_execution_result = None
-        self._update_undo_button_state()
+            success_count = len(successful_paths)
 
-        self.log("SUCCESS", f"Sent {success_count} file(s) to system trash ({failed_count} failed).")
-        self.set_status("COMPLETED", f"Trashed {success_count} file(s).", THEME["success"] if failed_count == 0 else THEME["warning"])
-
-        if failed_count > 0:
-            messagebox.showwarning(
-                "Trash Finished with Errors",
-                f"What happened:\n{success_count} file(s) moved to trash, but {failed_count} encountered errors.\n\n"
-                "Why:\nSome files may be locked, symbolic links, or removed externally.\n\n"
-                "Next steps:\nReview the Activity Log tab for details.",
+            self.log("SUCCESS", f"Sent {success_count} file(s) to system trash ({failed_count} failed).")
+            status_msg = f"Trashed {success_count} file(s)."
+            if failed_count > 0:
+                status_msg += f" ({failed_count} failed)"
+            self.set_status(
+                "COMPLETED",
+                status_msg,
+                THEME["success"] if failed_count == 0 else THEME["warning"],
             )
 
-        self.duplicate_groups.clear()
-        self._render_duplicate_groups()
+            if failed_count > 0:
+                messagebox.showwarning(
+                    "Trash Finished with Errors",
+                    f"What happened:\n{success_count} file(s) moved to trash, but {failed_count} encountered errors.\n\n"
+                    "Why:\nSome files may be locked, symbolic links, or removed externally.\n\n"
+                    "Next steps:\nReview the Activity Log tab for details.",
+                )
+
+            # Update duplicate model preserving unaffected groups
+            self.duplicate_groups = update_duplicate_groups_after_removal(
+                self.duplicate_groups, successful_paths
+            )
+            self._render_duplicate_groups()
+        finally:
+            self._is_executing = False
 
     # ------------------------------------------------------------------
     # View 3: Activity Log
@@ -1184,13 +1276,50 @@ class FileOrganizerApp(ctk.CTk):
             self.log("WARN", f"Directory dialog failed: {exc}")
             return ""
 
+    def _invalidate_target_dependent_state(self, new_path: Path):
+        """
+        Invalidate all cached plans, scan results, and UI elements tied to the target directory.
+        Cancels any ongoing scan and increments generation token to discard stale async worker results.
+        """
+        self.current_path = new_path
+        self._scan_generation += 1
+        if self._is_scanning:
+            self._cancel_scan.set()
+        self.current_plan = None
+        self.duplicate_groups.clear()
+        self.duplicate_scan_dir = None
+
+        if hasattr(self, "preview_container") and self.preview_container.winfo_exists():
+            for widget in self.preview_container.winfo_children():
+                widget.destroy()
+            ctk.CTkLabel(
+                self.preview_container,
+                text="No organization preview generated yet. Click 'Preview Organization' to inspect changes.",
+                font=ctk.CTkFont(size=12),
+                text_color=THEME["text_muted"],
+            ).pack(padx=20, pady=30)
+
+        if hasattr(self, "dup_results_container") and self.dup_results_container.winfo_exists():
+            self._render_duplicate_groups()
+            if hasattr(self, "dup_progress_label") and self.dup_progress_label.winfo_exists():
+                self.dup_progress_label.configure(
+                    text="Ready to scan root folder for byte-identical duplicates."
+                )
+
     def select_folder(self):
         initial_dir = self.current_path if self.current_path.exists() else Path.home()
         chosen = self._ask_directory_native(initial_dir)
         if not chosen:
             return
 
-        self.current_path = Path(chosen)
+        new_dir = Path(chosen)
+        try:
+            if new_dir.resolve() == self.current_path.resolve():
+                return
+        except OSError:
+            pass
+
+        self._invalidate_target_dependent_state(new_dir)
         self.path_entry.configure(state="normal")
         self.path_entry.delete(0, "end")
         self.path_entry.insert(0, str(self.current_path))

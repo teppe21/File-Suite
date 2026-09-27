@@ -122,10 +122,31 @@ def scan_duplicates(
         progress.current_file = file_path.name
         progress.files_processed = idx
 
+        try:
+            stat_before = file_path.stat()
+        except OSError:
+            progress.files_skipped += 1
+            continue
+
         file_hash = calculate_sha256(file_path, cancel_event=cancel_event)
         if file_hash is None:
             if cancel_event is not None and cancel_event.is_set():
                 return []
+            progress.files_skipped += 1
+            continue
+
+        # Post-hash consistency check: verify file did not change while being hashed
+        try:
+            stat_after = file_path.stat()
+            if (
+                stat_before.st_size != stat_after.st_size
+                or stat_before.st_mtime_ns != stat_after.st_mtime_ns
+                or stat_before.st_ino != stat_after.st_ino
+                or stat_before.st_dev != stat_after.st_dev
+            ):
+                progress.files_skipped += 1
+                continue
+        except OSError:
             progress.files_skipped += 1
             continue
 

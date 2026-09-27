@@ -213,6 +213,50 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertTrue(f1.exists())
         self.assertTrue(f2.exists())
 
+    def test_duplicate_move_plan_safety_checks(self):
+        """Verify build_duplicate_move_plan rejects invalid folders, outside files, symlinks, and self-containment."""
+        # 1. Invalid folder name (traversal attempt)
+        f_valid = self.target / "valid.jpg"
+        f_valid.write_text("data")
+        ok, _, err = build_duplicate_move_plan([f_valid], self.target, "../outside")
+        self.assertFalse(ok)
+        self.assertIsNotNone(err)
+
+        ok2, _, _ = build_duplicate_move_plan([f_valid], self.target, "sub/folder")
+        self.assertFalse(ok2)
+
+        # 2. File outside target directory
+        outside_file = self.target.parent / "outside.jpg"
+        outside_file.write_text("outside data")
+        try:
+            ok, plan, _ = build_duplicate_move_plan([outside_file], self.target, "Duplicates")
+            self.assertTrue(ok)
+            self.assertEqual(plan.affected_count, 0)
+        finally:
+            outside_file.unlink(missing_ok=True)
+
+        # 3. Symlink rejection
+        symlink_file = self.target / "symlink.jpg"
+        try:
+            os.symlink(f_valid, symlink_file)
+            ok, plan, _ = build_duplicate_move_plan([symlink_file], self.target, "Duplicates")
+            self.assertTrue(ok)
+            self.assertEqual(plan.affected_count, 0)
+        except OSError:
+            pass
+        finally:
+            if symlink_file.is_symlink() or symlink_file.exists():
+                symlink_file.unlink(missing_ok=True)
+
+        # 4. Source already inside destination duplicate folder
+        dup_folder = self.target / "Duplicates"
+        dup_folder.mkdir(exist_ok=True)
+        already_inside = dup_folder / "inside.jpg"
+        already_inside.write_text("already inside")
+        ok, plan, _ = build_duplicate_move_plan([already_inside], self.target, "Duplicates")
+        self.assertTrue(ok)
+        self.assertEqual(plan.affected_count, 0)
+
     def test_destination_replaced_by_symlink_before_execution(self):
         """Prevent traversal if destination folder is replaced by a symlink before execution."""
         f = self.target / "contract.pdf"

@@ -5,23 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] - 2026-09-26
+## [1.1.1] - 2026-09-27
 
 ### Added
-- **Destination Containment Hardening**: Added `_validate_destination_containment` in `operations.py` to revalidate destination directory components immediately prior to execution, rejecting any intermediate symbolic link injected after the dry-run preview.
-- **Deterministic Duplicate Ordering**: Implemented stable, case-insensitive sorting (`key=lambda p: (p.name.casefold(), str(p))`) for candidate files in `duplicates.py`, ensuring the default original file is identical regardless of OS directory iteration order.
-- **Hard Link Disk Reclaim Accounting**: Updated `DuplicateFile` and `DuplicateGroup.reclaimable_bytes` to evaluate device and inode pairs, ensuring shared hard links do not artificially inflate reclaimable storage metrics.
-- **Trash Transaction Rollback**: Enhanced `move_to_system_trash` with automatic metadata cleanup, ensuring `.trashinfo` files are deleted if the physical file move fails.
-- **Resilient Reverse Undo**: `undo_last_operation` processes records in reverse order, protects against destination symlinks, avoids overwriting newly created source files, and retains failed records for subsequent retry.
-- **Centralized Version Management**: Introduced `version.py` as the single source of truth for application versioning, consumed by `main.py`, `build.sh`, and unit tests.
-- **Tagged Release Automation**: Added `.github/workflows/release.yml` triggering on `v*` tags to validate tests, run Bandit, compile standalone binaries with `build.sh`, verify SHA-256 checksums, and publish GitHub Release assets.
-- **Dedicated CI Security Job**: Added Bandit security scanning to `.github/workflows/tests.yml` alongside Ruff and multi-version Python testing.
-- **Edge-Case Unit Tests**: Expanded test suite to 58 headless unit tests covering destination symlink injection, trash rollback, deterministic duplicate ordering, hard links, and version consistency.
+- **Dependency CVE Hardening**: Updated `Pillow>=12.3.0,<13` in `requirements.txt` to resolve 35 known CVEs; added `pip-audit` dependency scanning to CI.
+- **State Invalidation & Generation Guarding**: Centralized `_invalidate_target_dependent_state(new_path)` in `main.py` to reset organization preview, duplicate groups, and increment scan generation tokens, discarding stale worker callbacks upon directory changes.
+- **Duplicate Scan Thread Safety & Error Handling**: Wrapped scan worker in robust exception handling to restore UI state on worker exceptions without freezing buttons.
+- **Pre- and Post-Hash Stat Consistency**: Added size, mtime, inode, and device consistency checks before and after chunked SHA-256 calculation in `duplicates.py` to detect and safely skip concurrently modified files.
+- **Duplicate Model Partial State Updates**: Added `update_duplicate_groups_after_removal` in `models.py` to prune only successfully moved or trashed files from duplicate cards, leaving unaffected groups and files visible.
+- **Target Folder Containment for Duplicates**: Hardened `build_duplicate_move_plan` in `operations.py` with `resolve_destination` subfolder validation, source root containment checks, symlink rejection, and self-containment rejection.
+- **Post-Mkdir Undo Containment Check**: Hardened `undo_last_operation` with strict post-mkdir containment verification to prevent directory escape.
+- **Release Tag Verification**: Added automated GitHub Actions step in `release.yml` verifying `GITHUB_REF_NAME` matches `version.__version__`.
+- **Archive Extension Parity**: Added `.zst` and `.tar.zst` to `CATEGORIES["Archives"]` in `core.py`.
+- **Edge-Case Unit Tests**: Expanded test suite to 63 headless unit tests covering duplicate selections, model updates, post-hash file mutation, duplicate move plan safety, and archive classification.
 
 ### Changed
-- **Documentation Precision**: Revised `README.md` to remove inaccurate claims ("zero data loss", "zero latency", "atomic moves") in favor of precise technical explanations and an explicit Limitations section.
-- **User-Facing Error Formatting**: Restructured UI error dialogs into clear "What happened / Why / Next steps" messages with details logged to the activity viewer.
-- **Collision Path Checks**: Updated `build_collision_safe_path` to treat existing broken symlinks as occupied to prevent accidental file clobbering.
+- **Duplicate Action Safety**: Replaced confusing button controls with "Select Duplicates" (strictly selects redundant copies, leaving originals preserved) and "Clear Selection".
+- **Undo Independence**: Trashing duplicate files no longer clears `last_execution_result`, preserving undo capability for previous file organization operations.
+- **Execution Concurrency Guards**: Protected plan execution, undo, duplicate moves, and duplicate trashing with `_is_executing` flags to prevent UI double-click re-entrancy.
+- **CI Runners Pinned**: Pinned GitHub Actions runners to `ubuntu-24.04` to avoid runner drift.
+- **Documentation Precision**: Revised `README.md` with accurate test counts (63 tests), logical reclaimable space terminology, single-level undo documentation, and updated architecture diagrams.
 
 ---
 

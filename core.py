@@ -23,7 +23,7 @@ CATEGORIES: dict[str, set[str]] = {
     },
     "Archives": {
         ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2",
-        ".tar.xz", ".7z", ".rar", ".gz", ".bz2", ".xz",
+        ".tar.xz", ".tar.zst", ".7z", ".rar", ".gz", ".bz2", ".xz", ".zst",
     },
     "Media": {
         ".mp4", ".mkv", ".mov", ".avi", ".webm",

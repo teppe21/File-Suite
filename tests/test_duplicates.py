@@ -175,6 +175,9 @@ class DuplicateScanTests(unittest.TestCase):
 
     def test_unreadable_file_handled_gracefully(self):
         """Unreadable files (permission errors) are skipped without aborting the scan."""
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("Root user bypasses DAC permission restrictions")
+
         content = b"permission test"
         f1 = self.target / "f1.dat"
         f2 = self.target / "f2.dat"
@@ -193,6 +196,29 @@ class DuplicateScanTests(unittest.TestCase):
             self.assertEqual(len(groups), 0)
         finally:
             f1.chmod(0o644)
+
+    def test_file_modified_during_hashing_skipped(self):
+        """Files whose metadata changes during the hashing phase are safely skipped."""
+        from unittest.mock import patch
+        content = b"initial content for hash"
+        f1 = self.target / "f1.dat"
+        f2 = self.target / "f2.dat"
+        f1.write_bytes(content)
+        f2.write_bytes(content)
+
+        original_calc = calculate_sha256
+
+        def mutating_calc(path, *args, **kwargs):
+            res = original_calc(path, *args, **kwargs)
+            if path.name == "f1.dat":
+                # Modify file to trigger post-hash stat mismatch
+                path.write_bytes(b"mutated during hash")
+            return res
+
+        with patch("duplicates.calculate_sha256", side_effect=mutating_calc):
+            groups = scan_duplicates(self.target)
+            # f1 was skipped due to stat mismatch, so no duplicate group formed
+            self.assertEqual(len(groups), 0)
 
     def test_empty_files_handling(self):
         """0-byte duplicate files are detected cleanly with 0 reclaimable bytes."""

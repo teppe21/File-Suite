@@ -7,7 +7,9 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import (  # noqa: E402, I001
+    CATEGORIES,
     build_collision_safe_path,
+    classify_extension,
     collect_selected_extensions,
     normalize_extension,
     parse_custom_extensions,
@@ -113,6 +115,12 @@ class ExtensionTests(unittest.TestCase):
         self.assertIn(".iso", result)
         self.assertNotIn(".pdf", result)
 
+    def test_archive_extensions_classification(self):
+        self.assertIn(".zst", CATEGORIES["Archives"])
+        self.assertIn(".tar.zst", CATEGORIES["Archives"])
+        self.assertEqual(classify_extension(".zst", ".zst"), "Archives")
+        self.assertEqual(classify_extension(".zst", ".tar.zst"), "Archives")
+
 
 class CollisionTests(unittest.TestCase):
     def test_split_single(self):
@@ -124,6 +132,9 @@ class CollisionTests(unittest.TestCase):
         )
         self.assertEqual(
             split_stem_and_suffix("archive.tar.bz2"), ("archive", ".tar.bz2")
+        )
+        self.assertEqual(
+            split_stem_and_suffix("package.tar.zst"), ("package", ".tar.zst")
         )
 
     def test_split_none(self):
@@ -149,6 +160,10 @@ class CollisionTests(unittest.TestCase):
             (dest / "backup.tar.gz").touch()
             path = build_collision_safe_path(dest, "backup.tar.gz")
             self.assertEqual(path.name, "backup_1.tar.gz")
+
+            (dest / "data.tar.zst").touch()
+            path_zst = build_collision_safe_path(dest, "data.tar.zst")
+            self.assertEqual(path_zst.name, "data_1.tar.zst")
 
     def test_collision_no_extension(self):
         with TemporaryDirectory() as tmp:

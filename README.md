@@ -3,8 +3,8 @@
 ![Python](https://img.shields.io/badge/Python-3.10%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20(X11%20%7C%20Wayland)-FCC624?style=for-the-badge&logo=linux&logoColor=black)
-![Tests](https://img.shields.io/badge/Tests-58%20passed-success?style=for-the-badge)
-![Security](https://img.shields.io/badge/Security-Bandit%20%26%20Ruff-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-63%20passed-success?style=for-the-badge)
+![Security](https://img.shields.io/badge/Security-Bandit%20%7C%20Ruff%20%7C%20pip--audit-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 A small, serious, carefully engineered Linux desktop utility for organizing loose files and finding byte-identical duplicates inside a selected directory.
@@ -26,21 +26,21 @@ File Suite is designed around defensive filesystem practices: **preview before m
 - **Dry-Run Preview Workflow**:
   Inspect proposed moves before touching disk. The preview displays affected file counts, total size in MB, destination subfolders, and flags any collision renames in advance.
 - **Session-Based Undo**:
-  Restore organized or isolated files back to their original root locations in reverse execution order. Collision detection prevents overwriting files that may have been created at the root after the move.
+  Single-level, in-memory undo restoring organized or isolated files back to their original root locations in reverse execution order. Collision detection prevents overwriting files that may have been created at the root after the move.
 - **Deterministic Duplicate Manager**:
   - Stable, case-insensitive lexicographic sorting guarantees that the default "original" preserved copy is identical regardless of filesystem directory iteration order.
   - Group-by-group card view displaying SHA-256 digest prefixes and file byte sizes.
-  - Selection controls ("Keep Originals Only", "Select All Duplicates", "Clear Selection").
-  - Physical disk space calculation accounting for shared hard links (avoiding duplicate block overcounting).
+  - Clear selection controls ("Select Duplicates" preserves originals, "Clear Selection").
+  - Logical reclaimable disk space calculation accounting for shared hard links (avoiding duplicate inode block overcounting).
   - Choice of isolation into a `Duplicates/` folder (undoable) or sending to system trash.
 - **Defensive Filesystem Safety**:
   - **Symlink Protection**: Symlinks are strictly skipped to prevent directory traversal or remote target mutation.
   - **Destination Containment Hardening**: Destination paths and intermediate components are re-resolved immediately before execution to reject symlinks injected after the preview phase.
-  - **Collision Avoidance**: Multi-part extensions are preserved cleanly (`archive_1.tar.gz`). Existing broken symlinks at destination paths are treated as occupied.
+  - **Collision Avoidance**: Multi-part extensions are preserved cleanly (`archive_1.tar.gz`, `data_1.tar.zst`). Existing broken symlinks at destination paths are treated as occupied.
   - **Path Traversal Defense**: User-supplied destination folder names are sanitized against directory traversal attacks (`/`, `\`, `..`, control characters).
   - **Trash Transaction Rollback**: If moving a file to FreeDesktop trash fails, orphaned `.trashinfo` metadata is automatically cleaned up.
 - **Responsive Background Scanning**:
-  Duplicate scanning runs cooperatively on background threads with chunked 64 KB SHA-256 hashing, live progress feedback, and instant cancellation.
+  Duplicate scanning runs cooperatively on background threads with chunked 64 KB SHA-256 hashing, pre- and post-hash metadata consistency checks, live progress feedback, and instant cancellation.
 - **Diagnostics & Activity Log**:
   In-app viewer and CLI console logging with timestamped records for auditing operational outcomes and debugging fallbacks.
 - **Native Desktop Integration**:
@@ -78,9 +78,11 @@ graph TD
     UI --> DUP
     UI --> MOD
     UI --> VER
+    UI --> CORE
     OPS --> MOD
     OPS --> CORE
     DUP --> MOD
+    DUP --> CORE
     OPS --> FS
     OPS --> TRASH
     DUP --> FS
@@ -184,7 +186,7 @@ File Suite will appear in your application launcher (under System/Utilities) and
 The repository includes a headless unit test suite covering path safety, operation plans, collision handling, duplicate hashing, and undo semantics:
 
 ```bash
-# Run all 58 unit tests
+# Run all 63 unit tests
 python3 -m unittest discover -s tests -v
 
 # Run Ruff linter
@@ -192,14 +194,17 @@ ruff check .
 
 # Run Bandit security analysis
 bandit -c pyproject.toml -r .
+
+# Run pip-audit vulnerability scan
+pip-audit -r requirements.txt
 ```
 
 ### Continuous Integration
 
 Every push and pull request is validated through GitHub Actions across:
 - **Linting**: Ruff (PEP 8, Bugbear, Flake8, Pyupgrade).
-- **Security**: Bandit AST vulnerability scanner.
-- **Matrix Testing**: Python `3.10`, `3.11`, `3.12`, and `3.13`.
+- **Security**: Bandit AST scanner and pip-audit CVE dependency scanning.
+- **Matrix Testing**: Python `3.10`, `3.11`, `3.12`, and `3.13` on pinned `ubuntu-24.04`.
 - **Packaging**: Automated PyInstaller executable build and SHA-256 verification.
 
 ---
@@ -208,10 +213,11 @@ Every push and pull request is validated through GitHub Actions across:
 
 Releases are published automatically via GitHub Actions whenever a version tag (e.g. `v1.1.1`) is pushed:
 
-1. Runs complete lint, security, and unit test suites.
-2. Compiles standalone Linux binary via `build.sh`.
-3. Verifies SHA-256 checksums.
-4. Creates a GitHub Release with attached executable and checksum assets.
+1. Runs complete lint, security (`bandit` & `pip-audit`), and unit test suites.
+2. Verifies Git tag matches `version.py`.
+3. Compiles standalone Linux binary via `build.sh`.
+4. Verifies SHA-256 checksums.
+5. Creates a GitHub Release with attached executable and checksum assets.
 
 ---
 
@@ -222,7 +228,7 @@ File-Suite/
 ├── .github/
 │   └── workflows/
 │       ├── release.yml      # Tag-triggered release workflow
-│       └── tests.yml        # CI test matrix (3.10-3.13), Ruff & Bandit validation
+│       └── tests.yml        # CI test matrix (3.10-3.13), Ruff, Bandit & pip-audit validation
 ├── .gitignore               # Security-hardened gitignore
 ├── CHANGELOG.md             # Semantic release history (Keep a Changelog)
 ├── LICENSE                  # MIT License
@@ -239,10 +245,10 @@ File-Suite/
 ├── requirements.txt         # Runtime dependencies
 ├── version.py               # Single source of truth for versioning
 └── tests/
-    ├── test_core.py         # Path validation & renaming tests (21 tests)
-    ├── test_duplicates.py   # Hashing, deterministic order, hardlink tests (11 tests)
-    ├── test_models.py       # Dataclass & metric calculation tests (5 tests)
-    ├── test_operations.py   # Move execution, containment, symlink, trash tests (18 tests)
+    ├── test_core.py         # Path validation & renaming tests (22 tests)
+    ├── test_duplicates.py   # Hashing, deterministic order, hardlink tests (12 tests)
+    ├── test_models.py       # Dataclass & metric calculation tests (7 tests)
+    ├── test_operations.py   # Move execution, containment, symlink, trash tests (19 tests)
     └── test_version.py      # Version consistency and wiring tests (3 tests)
 ```
 
