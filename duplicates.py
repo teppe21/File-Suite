@@ -12,6 +12,7 @@ from pathlib import Path
 
 from core import group_by_size
 from models import DuplicateFile, DuplicateGroup, ScanProgress
+from platform_utils import is_cloud_placeholder, is_hidden
 
 
 def calculate_sha256(
@@ -74,8 +75,13 @@ def scan_duplicates(
         if cancel_event is not None and cancel_event.is_set():
             return []
 
-        # Safety: skip symlinks, directories, and hidden files
-        if item.is_symlink() or item.is_dir() or item.name.startswith("."):
+        # Safety: skip symlinks, directories, hidden files, and cloud-only files
+        if (
+            item.is_symlink()
+            or item.is_dir()
+            or is_hidden(item)
+            or is_cloud_placeholder(item)
+        ):
             skipped_count += 1
             continue
 
