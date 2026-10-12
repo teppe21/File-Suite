@@ -179,7 +179,8 @@ def scan_duplicates(
                 try:
                     st = p.stat()
                     f_size = st.st_size
-                    f_inode = st.st_ino
+                    # st_ino == 0 means "unknown" (FAT32/exFAT, some network shares)
+                    f_inode = st.st_ino or None
                     f_dev = st.st_dev
                 except OSError:
                     f_size = single_size

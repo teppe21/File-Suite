@@ -153,6 +153,7 @@ class DuplicateGroup:
         """
         Estimate logical disk space reclaimed if non-original duplicate files are removed.
         Accounts for shared hard links (inodes); based on logical file size.
+        An inode of 0 or None is unknown and never matches another file.
         """
         if len(self.files) <= 1:
             return 0
@@ -160,7 +161,7 @@ class DuplicateGroup:
         orig = self.original
         orig_dev_ino = (
             (orig.device, orig.inode)
-            if (orig and orig.device is not None and orig.inode is not None)
+            if (orig and orig.device is not None and orig.inode)
             else None
         )
 
@@ -168,7 +169,7 @@ class DuplicateGroup:
         untracked_duplicates = 0
 
         for f in self.duplicates:
-            if f.device is not None and f.inode is not None:
+            if f.device is not None and f.inode:
                 dev_ino = (f.device, f.inode)
                 if orig_dev_ino is None or dev_ino != orig_dev_ino:
                     unique_dup_inodes.add(dev_ino)
