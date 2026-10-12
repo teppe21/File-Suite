@@ -47,11 +47,11 @@ IO_REPARSE_TAG_CLOUD_6 = 0x9000601A  # OneDrive folder
 
 class WindowsNameProblemTests(unittest.TestCase):
     def test_valid_names(self):
-        for name in ("Photos", "my.folder", "Ünïcode", "CONSOLE", "COM0", "nulx", "a" * 255):
+        for name in ("Sorted_Archive", "Photos", "my.folder", "Ünïcode", "CONSOLE", "COM0", "nulx", "a" * 255):
             self.assertIsNone(windows_name_problem(name), name)
 
     def test_forbidden_characters(self):
-        for name in ("foo<", "foo>", "foo:bar", 'a"b', "a|b", "a?b", "a*b", "a\x01b"):
+        for name in ("foo<", "foo>", "foo:bar", 'a"b', "a|b", "a?b", "a*b", "a\x01b", "a\x1fb", "a/b", "a\\b"):
             self.assertIsNotNone(windows_name_problem(name), name)
 
     def test_trailing_space_or_dot(self):
@@ -59,7 +59,7 @@ class WindowsNameProblemTests(unittest.TestCase):
         self.assertIsNotNone(windows_name_problem("name "))
 
     def test_reserved_device_names(self):
-        for name in ("CON", "con", "Nul", "nul.txt", "AUX.tar.gz", "COM1", "lpt9", "COM¹", "LPT³", "NUL .txt"):
+        for name in ("CON", "con", "Nul", "NUL.txt", "nul.txt", "AUX.tar.gz", "COM1", "lpt9", "COM¹", "LPT³", "NUL .txt"):
             self.assertIsNotNone(windows_name_problem(name), name)
 
     def test_length_limit_counts_utf16_units(self):
@@ -93,6 +93,8 @@ class AttributeTests(unittest.TestCase):
         cases = {
             FILE_ATTRIBUTE_HIDDEN: True,
             FILE_ATTRIBUTE_SYSTEM: True,
+            FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM: True,
+            0x20: False,  # FILE_ATTRIBUTE_ARCHIVE
             0: False,
             None: True,  # unreadable attributes are treated as hidden
         }
@@ -102,11 +104,18 @@ class AttributeTests(unittest.TestCase):
 
     def test_cloud_placeholder(self):
         for attrs in (FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS):
-            with patch("platform_utils.windows_attrs", return_value=attrs):
+            with patch("platform_utils.IS_WINDOWS", True), patch("platform_utils.windows_attrs", return_value=attrs):
                 self.assertTrue(is_cloud_placeholder(Path("file.txt")))
         for attrs in (0, FILE_ATTRIBUTE_HIDDEN, None):
-            with patch("platform_utils.windows_attrs", return_value=attrs):
+            with patch("platform_utils.IS_WINDOWS", True), patch("platform_utils.windows_attrs", return_value=attrs):
                 self.assertFalse(is_cloud_placeholder(Path("file.txt")))
+
+    def test_windows_attrs_reads_lstat(self):
+        with patch("platform_utils.IS_WINDOWS", True):
+            with patch.object(Path, "lstat", return_value=SimpleNamespace(st_file_attributes=0x22)):
+                self.assertEqual(platform_utils.windows_attrs(Path("x")), 0x22)
+            with patch.object(Path, "lstat", side_effect=PermissionError()):
+                self.assertIsNone(platform_utils.windows_attrs(Path("x")))
 
     @unittest.skipIf(ON_WINDOWS, "non-Windows behavior")
     def test_windows_attrs_none_off_windows(self):
@@ -130,12 +139,22 @@ class IsLinkLikeTests(unittest.TestCase):
     def test_windows_reparse_tags(self):
         self._check(True, tag=IO_REPARSE_TAG_MOUNT_POINT)
         self._check(True, mode=stat.S_IFLNK, tag=IO_REPARSE_TAG_SYMLINK)
+        self._check(True, mode=stat.S_IFLNK)
+        self._check(True, mode=stat.S_IFREG, tag=IO_REPARSE_TAG_SYMLINK)
         self._check(False, tag=IO_REPARSE_TAG_CLOUD_6)  # OneDrive folders are not links
         self._check(False)
 
     def test_windows_errors(self):
         self._check(False, error=FileNotFoundError())
         self._check(True, error=PermissionError())
+
+    def test_linux_uses_is_symlink_only(self):
+        for result in (False, True):
+            with patch("platform_utils.IS_WINDOWS", False), patch.object(
+                Path, "is_symlink", return_value=result
+            ), patch.object(Path, "lstat") as lstat:
+                self.assertEqual(is_link_like(Path("x")), result)
+            lstat.assert_not_called()
 
     def test_real_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -188,6 +207,26 @@ class MoveAndTrashTests(unittest.TestCase):
         self.assertFalse(src.exists())
         self.assertEqual((self.target / "b.txt").read_text(), "data")
 
+    def test_move_file_dispatch(self):
+        src, dst = self.target / "a.txt", self.target / "b.txt"
+        with patch("platform_utils.os.rename") as rename, patch("platform_utils.shutil.move") as move:
+            with patch("platform_utils.IS_WINDOWS", True):
+                move_file(src, dst)
+            rename.assert_called_once_with(src, dst)
+            move.assert_not_called()  # no copy fallback on Windows
+            rename.reset_mock()
+            with patch("platform_utils.IS_WINDOWS", False):
+                move_file(src, dst)
+            move.assert_called_once_with(str(src), str(dst))
+            rename.assert_not_called()
+
+    def test_move_file_windows_errors_propagate(self):
+        with patch("platform_utils.IS_WINDOWS", True), patch(
+            "platform_utils.os.rename", side_effect=FileExistsError()
+        ), patch("platform_utils.shutil.move") as move, self.assertRaises(FileExistsError):
+            move_file(self.target / "a.txt", self.target / "b.txt")
+        move.assert_not_called()
+
     @unittest.skipUnless(ON_WINDOWS, "Windows file locking")
     def test_move_open_file_leaves_no_copy(self):
         src = self.target / "a.txt"
@@ -211,15 +250,24 @@ class MoveAndTrashTests(unittest.TestCase):
     def test_move_to_system_trash_dispatch(self):
         f = self.target / "a.txt"
         f.write_text("data")
-        with patch("operations.IS_WINDOWS", True), patch("operations.trash_windows", return_value=(True, None)) as tw:
+        fake = MagicMock()
+        with patch("operations.IS_WINDOWS", True), patch.dict(
+            sys.modules, {"send2trash": SimpleNamespace(send2trash=fake)}
+        ):
             self.assertEqual(move_to_system_trash(self.target / "missing.txt")[0], False)
-            tw.assert_not_called()
+            self.assertEqual(move_to_system_trash(self.target)[0], False)  # not a regular file
+            fake.assert_not_called()
             self.assertEqual(move_to_system_trash(f), (True, None))
-            tw.assert_called_once_with(f)
+            fake.assert_called_once_with(str(f))
+            fake.side_effect = PermissionError("locked")
+            ok, err = move_to_system_trash(f)
+            self.assertFalse(ok)
+            self.assertIn("Failed to trash 'a.txt'", err or "")
+            fake.side_effect = None
             # An explicit trash_dir always uses the FreeDesktop layout
             ok, _ = move_to_system_trash(f, trash_dir=self.target / "Trash")
         self.assertTrue(ok)
-        self.assertEqual(tw.call_count, 1)
+        self.assertEqual(fake.call_count, 2)
         self.assertTrue((self.target / "Trash" / "files" / "a.txt").exists())
 
 
@@ -234,7 +282,9 @@ class CloudPlaceholderCallSiteTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_plan_skips_cloud_files(self):
-        with patch("platform_utils.windows_attrs", return_value=FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS):
+        with patch("platform_utils.IS_WINDOWS", True), patch(
+            "platform_utils.windows_attrs", return_value=FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+        ):
             ok, plan, _ = build_organization_plan(self.target, {".txt"})
         self.assertTrue(ok)
         self.assertEqual(plan.affected_count, 0)
@@ -244,7 +294,9 @@ class CloudPlaceholderCallSiteTests(unittest.TestCase):
         )
 
     def test_scan_skips_cloud_files(self):
-        with patch("platform_utils.windows_attrs", return_value=FILE_ATTRIBUTE_OFFLINE), patch(
+        with patch("platform_utils.IS_WINDOWS", True), patch(
+            "platform_utils.windows_attrs", return_value=FILE_ATTRIBUTE_OFFLINE
+        ), patch(
             "duplicates.calculate_sha256"
         ) as calc:
             self.assertEqual(scan_duplicates(self.target), [])

@@ -5,6 +5,7 @@ Unit tests for duplicates.py: chunked hashing, size pre-filtering, cancellation,
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -173,6 +174,7 @@ class DuplicateScanTests(unittest.TestCase):
         # Only f2 remained, so no duplicate group formed, and engine didn't crash
         self.assertEqual(len(groups), 0)
 
+    @unittest.skipIf(sys.platform == "win32", "chmod(0o000) does not block reads on Windows")
     def test_unreadable_file_handled_gracefully(self):
         """Unreadable files (permission errors) are skipped without aborting the scan."""
         if hasattr(os, "geteuid") and os.geteuid() == 0:
