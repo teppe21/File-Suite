@@ -40,6 +40,7 @@ from operations import (
     move_to_system_trash,
     undo_last_operation,
 )
+from platform_utils import IS_WINDOWS, mono_font, trash_label
 from version import __version__
 
 
@@ -126,6 +127,16 @@ class FileOrganizerApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _set_window_icon(self):
+        ico_path = _resource_path("organizer.ico")
+        if IS_WINDOWS and ico_path.exists():
+            try:
+                self.iconbitmap(default=str(ico_path))
+                # CustomTkinter applies its own default icon shortly after start-up.
+                self.after(250, lambda: self.iconbitmap(default=str(ico_path)))
+            except Exception as exc:
+                print(f"[WARNING] Could not load window icon: {exc}")
+            return
+
         icon_path = _resource_path("organizer.jpg")
         if not icon_path.exists():
             return
@@ -1117,8 +1128,8 @@ class FileOrganizerApp(ctk.CTk):
             return
 
         if not messagebox.askyesno(
-            "Confirm System Trash",
-            f"Send {len(selected)} selected duplicate file(s) to the system trash?\n\nNote: Undo from application is unavailable for trashed files.",
+            f"Confirm {trash_label().title()}",
+            f"Send {len(selected)} selected duplicate file(s) to the {trash_label()}?\n\nNote: Undo from application is unavailable for trashed files.",
         ):
             return
 
@@ -1138,7 +1149,7 @@ class FileOrganizerApp(ctk.CTk):
 
             success_count = len(successful_paths)
 
-            self.log("SUCCESS", f"Sent {success_count} file(s) to system trash ({failed_count} failed).")
+            self.log("SUCCESS", f"Sent {success_count} file(s) to {trash_label()} ({failed_count} failed).")
             status_msg = f"Trashed {success_count} file(s)."
             if failed_count > 0:
                 status_msg += f" ({failed_count} failed)"
@@ -1202,7 +1213,7 @@ class FileOrganizerApp(ctk.CTk):
 
         self.log_box = ctk.CTkTextbox(
             container,
-            font=("Monospace", 11),
+            font=(mono_font(), 11),
             corner_radius=8,
             fg_color=THEME["surface"],
             border_width=1,
@@ -1248,7 +1259,9 @@ class FileOrganizerApp(ctk.CTk):
     def _ask_directory_native(self, initial_dir: Path) -> str:
         initial_str = str(initial_dir)
 
-        if shutil.which("zenity"):
+        is_linux = sys.platform.startswith("linux")
+
+        if is_linux and shutil.which("zenity"):
             try:
                 cmd = ["zenity", "--file-selection", "--directory", f"--filename={initial_str}/"]
                 res = subprocess.run(cmd, capture_output=True, text=True)
@@ -1259,7 +1272,7 @@ class FileOrganizerApp(ctk.CTk):
             except (subprocess.SubprocessError, OSError):
                 self.log("WARN", "Zenity dialog failed, attempting fallback.")
 
-        if shutil.which("kdialog"):
+        if is_linux and shutil.which("kdialog"):
             try:
                 cmd = ["kdialog", "--getexistingdirectory", initial_str]
                 res = subprocess.run(cmd, capture_output=True, text=True)
