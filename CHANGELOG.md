@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Windows Support (Experimental)**: File Suite runs on Windows 10 22H2+ and Windows 11 (x64) from source. Adds `platform_utils.py` for platform-specific behavior; Linux code paths are unchanged.
+- **Windows Support (Experimental)**: File Suite runs on Windows 10 22H2+ and Windows 11 (x64) from source. Adds `platform_utils.py` for platform-specific behavior; Linux behavior is unchanged except for the inode `0` change below.
   - Windows hidden and system files, cloud-only OneDrive files, and junctions and mount points are skipped or rejected; Windows-invalid folder names are rejected; files are moved without overwriting.
   - Deleted duplicates go to the Recycle Bin via `send2trash` (installed on Windows only).
+  - On drives other than fixed local disks (for example USB sticks and network shares), the app warns before deleting duplicates and in the log that files may be deleted permanently instead of going to the Recycle Bin.
+  - `CONIN$` and `CONOUT$` are rejected as reserved folder names.
   - Windows window icon (`organizer.ico`) and monospace log font.
 - **Windows Packaging**: `packaging/windows/build.ps1` builds a PyInstaller one-dir bundle and writes `FileSuite-windows-x64-v<version>.zip` with a SHA-256 checksum file.
 - **Windows CI**: `windows.yml` runs the test suite on Python 3.10-3.13 and builds the bundle, which is uploaded as a workflow artifact. The zip is not yet attached to GitHub Releases.
