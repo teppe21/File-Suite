@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(experimental)-FCC624?style=for-the-badge&logo=linux&logoColor=black)
-![Tests](https://img.shields.io/badge/Tests-63%20passed-success?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-102%20tests-success?style=for-the-badge)
 ![Security](https://img.shields.io/badge/Security-Bandit%20%7C%20Ruff%20%7C%20pip--audit-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
@@ -231,7 +231,7 @@ File Suite will appear in your application launcher (under System/Utilities) and
 The repository includes a headless unit test suite covering path safety, operation plans, collision handling, duplicate hashing, and undo semantics:
 
 ```bash
-# Run all 63 unit tests
+# Run all unit tests (102; Windows-only and Linux-only tests are skipped on the other platform)
 python3 -m unittest discover -s tests -v
 
 # Run Ruff linter
@@ -273,7 +273,8 @@ File-Suite/
 ├── .github/
 │   └── workflows/
 │       ├── release.yml      # Tag-triggered release workflow
-│       └── tests.yml        # CI test matrix (3.10-3.13), Ruff, Bandit & pip-audit validation
+│       ├── tests.yml        # CI test matrix (3.10-3.13), Ruff, Bandit & pip-audit validation
+│       └── windows.yml      # Windows test matrix (3.10-3.13) and bundle build
 ├── .gitignore               # Security-hardened gitignore
 ├── CHANGELOG.md             # Semantic release history (Keep a Changelog)
 ├── LICENSE                  # MIT License
@@ -285,7 +286,14 @@ File-Suite/
 ├── main.py                  # CustomTkinter graphite UI, view router & event loop
 ├── models.py                # Dataclasses: plans, items, results, groups, progress
 ├── operations.py            # Plan creation, dry-run preview, containment checks, undo
+├── organizer.ico            # Windows application icon
 ├── organizer.jpg            # Application desktop icon
+├── packaging/
+│   └── windows/
+│       ├── FileSuite.spec   # PyInstaller one-dir spec
+│       ├── build.ps1        # Builds the bundle, zip and SHA-256 file
+│       └── make_icon.py     # Regenerates organizer.ico from organizer.jpg
+├── platform_utils.py        # Windows/Linux platform helpers (hidden files, links, trash, names)
 ├── pyproject.toml           # Ruff and Bandit linter configuration
 ├── requirements.txt         # Runtime dependencies
 ├── version.py               # Single source of truth for versioning
@@ -294,7 +302,9 @@ File-Suite/
     ├── test_duplicates.py   # Hashing, deterministic order, hardlink tests (12 tests)
     ├── test_models.py       # Dataclass & metric calculation tests (7 tests)
     ├── test_operations.py   # Move execution, containment, symlink, trash tests (19 tests)
-    └── test_version.py      # Version consistency and wiring tests (3 tests)
+    ├── test_platform_utils.py # Platform helper tests (30 tests)
+    ├── test_version.py      # Version consistency and wiring tests (3 tests)
+    └── test_windows.py      # Windows filesystem tests, skipped elsewhere (9 tests)
 ```
 
 ---
