@@ -15,6 +15,7 @@ env/
 build/
 dist/
 *.spec
+!packaging/windows/FileSuite.spec
 
 # Editors / OS
 .vscode/

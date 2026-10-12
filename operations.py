@@ -26,6 +26,15 @@ from models import (
     OperationStatus,
     OperationType,
 )
+from platform_utils import (
+    IS_WINDOWS,
+    describe_os_error,
+    is_cloud_placeholder,
+    is_hidden,
+    is_link_like,
+    move_file,
+    trash_windows,
+)
 
 
 def build_organization_plan(
@@ -90,7 +99,7 @@ def build_organization_plan(
             continue
 
         # Safety rule: skip hidden files
-        if item.name.startswith("."):
+        if is_hidden(item):
             plan.items.append(
                 OperationItem(
                     source=item,
@@ -108,6 +117,18 @@ def build_organization_plan(
                     destination=None,
                     status=OperationStatus.SKIPPED,
                     skip_reason="Special/non-regular file skipped",
+                )
+            )
+            continue
+
+        # Safety rule: never hash or move cloud-only files (would trigger a download)
+        if is_cloud_placeholder(item):
+            plan.items.append(
+                OperationItem(
+                    source=item,
+                    destination=None,
+                    status=OperationStatus.SKIPPED,
+                    skip_reason="Cloud-only file skipped (would trigger download)",
                 )
             )
             continue
@@ -188,13 +209,13 @@ def _validate_destination_containment(dest: Path, target_root: Path) -> tuple[bo
     # Verify no parent directory component between target_root and dest is a symlink
     curr = dest.parent
     while curr != target_root and curr != curr.parent:
-        if curr.is_symlink():
+        if is_link_like(curr):
             return False, f"Destination path component '{curr.name}' is a symbolic link"
         curr = curr.parent
 
     dest_dir = dest.parent
     if dest_dir.exists():
-        if dest_dir.is_symlink():
+        if is_link_like(dest_dir):
             return False, f"Destination directory '{dest_dir.name}' is a symbolic link"
         try:
             resolved_dest_dir = dest_dir.resolve(strict=True)
@@ -327,7 +348,7 @@ def execute_operation_plan(
         allocated_destinations.add(actual_dest)
 
         try:
-            shutil.move(str(src), str(actual_dest))
+            move_file(src, actual_dest)
             item.status = OperationStatus.APPLIED
             item.destination = actual_dest
             item.final_name = actual_dest.name
@@ -336,8 +357,8 @@ def execute_operation_plan(
             )
         except OSError as exc:
             item.status = OperationStatus.FAILED
-            item.error_message = f"Move failed: {exc}"
-            result.failed_moves.append((src, actual_dest, str(exc)))
+            item.error_message = f"Move failed: {describe_os_error(exc)}"
+            result.failed_moves.append((src, actual_dest, describe_os_error(exc)))
 
     return result
 
@@ -396,7 +417,7 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
             continue
 
         orig_parent = original_loc.parent
-        if orig_parent.is_symlink():
+        if is_link_like(orig_parent):
             failed_count += 1
             errors.append(f"Cannot restore '{current_loc.name}': original folder is a symbolic link.")
             retained_moves.append(record)
@@ -431,11 +452,11 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
                 errors.append(f"Cannot restore '{current_loc.name}': restored parent directory escapes root.")
                 retained_moves.append(record)
                 continue
-            shutil.move(str(current_loc), str(target_restore))
+            move_file(current_loc, target_restore)
             undone_count += 1
         except OSError as exc:
             failed_count += 1
-            errors.append(f"Failed to restore '{current_loc.name}': {exc}")
+            errors.append(f"Failed to restore '{current_loc.name}': {describe_os_error(exc)}")
             retained_moves.append(record)
 
     # Retain only failed moves in result so subsequent retries only process un-restored items
@@ -462,6 +483,9 @@ def move_to_system_trash(
 
     if not file_path.is_file():
         return False, f"Path is not a regular file: {file_path.name}"
+
+    if trash_dir is None and IS_WINDOWS:
+        return trash_windows(file_path)
 
     base_trash = trash_dir if trash_dir is not None else Path.home() / ".local/share/Trash"
     trash_files_dir = base_trash / "files"
@@ -538,6 +562,9 @@ def build_duplicate_move_plan(
 
     for f in duplicates:
         if not f.exists() or f.is_symlink() or not f.is_file():
+            continue
+
+        if is_cloud_placeholder(f):
             continue
 
         try:

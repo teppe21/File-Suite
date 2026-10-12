@@ -1,0 +1,83 @@
+name: Windows Tests
+
+on:
+  push:
+    branches: [main, windows-port]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Windows, Python ${{ matrix.python-version }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pip-audit vulnerability scan
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s tests -v
+
+  build:
+    name: Build (Windows bundle)
+    needs: test
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build bundle
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+
+      - name: Verify checksum
+        run: |
+          python -c "import glob, hashlib, os; f = glob.glob('dist/*.zip')[0]; h, n = open(f + '.sha256').read().split(); assert n == os.path.basename(f) and h == hashlib.sha256(open(f, 'rb').read()).hexdigest(); print(n, 'OK')"
+
+      - name: Check bundle contents
+        run: |
+          python -c "import pathlib; b = pathlib.Path('dist/FileSuite'); assert (b / 'FileSuite.exe').is_file(); assert list(b.rglob('organizer.ico')) and list(b.rglob('organizer.jpg')); assert [d for d in b.rglob('customtkinter') if (d / 'assets').is_dir()]; print('bundle OK')"
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/FileSuite/FileSuite.exe -PassThru
+          Start-Sleep -Seconds 5
+          $alive = -not $p.HasExited
+          if ($alive) { $p.Kill() }
+          if (-not $alive) { throw "FileSuite.exe exited within 5 seconds" }
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileSuite-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256

@@ -72,6 +72,7 @@ class ValidateFolderNameTests(unittest.TestCase):
             self.assertTrue(ok, f"{name!r} should be accepted")
             self.assertEqual(cleaned, name)
 
+    @unittest.skipIf(sys.platform == "win32", "Windows rejects : ? * and double quotes in folder names")
     def test_symbols_in_names(self):
         # Colon, question mark, asterisk etc. are legal on Linux.
         for name in ["foo:bar", "foo?bar", "foo*bar", "a'b", 'a"b']:
