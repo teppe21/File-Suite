@@ -25,6 +25,7 @@ FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x40000
 FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
 IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 IO_REPARSE_TAG_SYMLINK = 0xA000000C
+DRIVE_FIXED = 3  # GetDriveTypeW result for a local fixed disk
 
 _CLOUD_PLACEHOLDER_ATTRS = (
     FILE_ATTRIBUTE_OFFLINE
@@ -42,7 +43,7 @@ _LINK_REPARSE_TAGS = (
 _WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"|?*/\\')
 
 _WINDOWS_RESERVED_NAMES = frozenset(
-    ["CON", "PRN", "AUX", "NUL"]
+    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
     + [f"{dev}{n}" for dev in ("COM", "LPT") for n in "123456789¹²³"]
 )
 
@@ -153,6 +154,34 @@ def trash_windows(path: Path) -> tuple[bool, str | None]:
     except OSError as exc:
         return False, f"Failed to trash '{path.name}': {exc}"
     return True, None
+
+
+def windows_drive_type(root: str) -> int:
+    """Return the ``GetDriveTypeW`` result for the drive root ``root``."""
+    import ctypes
+
+    get_drive_type = ctypes.windll.kernel32.GetDriveTypeW
+    get_drive_type.argtypes = [ctypes.c_wchar_p]
+    get_drive_type.restype = ctypes.c_uint
+    return get_drive_type(root)
+
+
+def trash_may_be_permanent(path: Path) -> bool:
+    """
+    Return True if sending ``path`` to the Recycle Bin may delete it
+    permanently: on drives other than fixed local disks (USB sticks,
+    network shares) there may be no Recycle Bin. Always False off Windows.
+    A missing drive root or a failed lookup counts as True.
+    """
+    if not IS_WINDOWS:
+        return False
+    drive = os.path.splitdrive(os.path.abspath(path))[0]
+    if not drive:
+        return True
+    try:
+        return windows_drive_type(drive + "\\") != DRIVE_FIXED
+    except Exception:
+        return True
 
 
 def describe_os_error(exc: OSError) -> str:

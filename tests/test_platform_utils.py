@@ -7,6 +7,7 @@ Windows branches are exercised on every OS by patching ``IS_WINDOWS`` and the
 
 from __future__ import annotations
 
+import ntpath
 import stat
 import sys
 import tempfile
@@ -37,6 +38,7 @@ from platform_utils import (
     is_hidden,
     is_link_like,
     move_file,
+    trash_may_be_permanent,
     trash_windows,
     windows_name_problem,
 )
@@ -60,6 +62,8 @@ class WindowsNameProblemTests(unittest.TestCase):
 
     def test_reserved_device_names(self):
         for name in ("CON", "con", "Nul", "NUL.txt", "nul.txt", "AUX.tar.gz", "COM1", "lpt9", "COM¹", "LPT³", "NUL .txt"):
+            self.assertIsNotNone(windows_name_problem(name), name)
+        for name in ("CONIN$", "conout$", "CONIN$.txt"):
             self.assertIsNotNone(windows_name_problem(name), name)
 
     def test_length_limit_counts_utf16_units(self):
@@ -190,6 +194,38 @@ class OsErrorAndUiTests(unittest.TestCase):
         with patch("platform_utils.IS_WINDOWS", True):
             self.assertEqual(platform_utils.mono_font(), "Consolas")
             self.assertEqual(platform_utils.trash_label(), "Recycle Bin")
+
+
+class TrashMayBePermanentTests(unittest.TestCase):
+    # ntpath makes the Windows path handling testable on Linux too.
+    def _check(self, path: str, drive_type=None, side_effect=None) -> tuple[bool, MagicMock]:
+        seam = MagicMock(return_value=drive_type, side_effect=side_effect)
+        with patch("platform_utils.IS_WINDOWS", True), patch("os.path", ntpath), patch(
+            "platform_utils.windows_drive_type", seam
+        ):
+            return trash_may_be_permanent(Path(path)), seam
+
+    def test_off_windows_never_asks(self):
+        with patch("platform_utils.IS_WINDOWS", False), patch("platform_utils.windows_drive_type") as seam:
+            self.assertFalse(trash_may_be_permanent(Path(__file__)))
+        seam.assert_not_called()
+
+    def test_drive_types(self):
+        self.assertFalse(self._check(r"C:\data\a.txt", 3)[0])  # DRIVE_FIXED
+        # unknown, no root dir, removable, remote, CD-ROM, RAM disk
+        for drive_type in (0, 1, 2, 4, 5, 6):
+            self.assertTrue(self._check(r"C:\data\a.txt", drive_type)[0], drive_type)
+
+    def test_roots(self):
+        _, seam = self._check(r"C:\data\a.txt", 3)
+        seam.assert_called_once_with("C:\\")
+        result, seam = self._check(r"\\server\share\dir\a.txt", 4)
+        self.assertTrue(result)
+        seam.assert_called_once_with("\\\\server\\share\\")
+
+    def test_lookup_failure_is_unsafe(self):
+        self.assertTrue(self._check(r"C:\data\a.txt", side_effect=OSError("boom"))[0])
+        self.assertTrue(self._check(r"C:\data\a.txt", side_effect=AttributeError("windll"))[0])
 
 
 class MoveAndTrashTests(unittest.TestCase):

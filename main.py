@@ -40,7 +40,7 @@ from operations import (
     move_to_system_trash,
     undo_last_operation,
 )
-from platform_utils import IS_WINDOWS, mono_font, trash_label
+from platform_utils import IS_WINDOWS, mono_font, trash_label, trash_may_be_permanent
 from version import __version__
 
 
@@ -1127,10 +1127,12 @@ class FileOrganizerApp(ctk.CTk):
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to trash.")
             return
 
-        if not messagebox.askyesno(
-            f"Confirm {trash_label().title()}",
-            f"Send {len(selected)} selected duplicate file(s) to the {trash_label()}?\n\nNote: Undo from application is unavailable for trashed files.",
-        ):
+        # The scan is non-recursive, so every selected file is on this folder's drive.
+        may_be_permanent = trash_may_be_permanent(self.duplicate_scan_dir)
+        confirm_text = f"Send {len(selected)} selected duplicate file(s) to the {trash_label()}?\n\nNote: Undo from application is unavailable for trashed files."
+        if may_be_permanent:
+            confirm_text += f"\n\nFiles on this drive may be deleted permanently instead of being sent to the {trash_label()}."
+        if not messagebox.askyesno(f"Confirm {trash_label().title()}", confirm_text):
             return
 
         self._is_executing = True
@@ -1149,7 +1151,10 @@ class FileOrganizerApp(ctk.CTk):
 
             success_count = len(successful_paths)
 
-            self.log("SUCCESS", f"Sent {success_count} file(s) to {trash_label()} ({failed_count} failed).")
+            if may_be_permanent:
+                self.log("WARN", f"Removed {success_count} file(s) ({failed_count} failed). Files on this drive may have been deleted permanently instead of being sent to the {trash_label()}.")
+            else:
+                self.log("SUCCESS", f"Sent {success_count} file(s) to {trash_label()} ({failed_count} failed).")
             status_msg = f"Trashed {success_count} file(s)."
             if failed_count > 0:
                 status_msg += f" ({failed_count} failed)"
