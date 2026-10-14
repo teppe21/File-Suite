@@ -2,9 +2,12 @@ name: Windows Tests
 
 on:
   push:
-    branches: [main, windows-port]
+    branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test:

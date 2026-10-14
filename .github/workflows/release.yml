@@ -55,9 +55,39 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
 
+  build-windows:
+    name: Build Windows bundle
+    needs: validate
+    runs-on: windows-2025
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build bundle
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+
+      - name: Verify checksum
+        run: |
+          python -c "import glob, hashlib, os; f = glob.glob('dist/*.zip')[0]; h, n = open(f + '.sha256').read().split(); assert n == os.path.basename(f) and h == hashlib.sha256(open(f, 'rb').read()).hexdigest(); print(n, 'OK')"
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileSuite-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
   build-release:
     name: Build & Publish Release
-    needs: validate
+    needs: [validate, build-windows]
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
@@ -78,10 +108,19 @@ jobs:
           cd dist
           sha256sum -c FileSuite.sha256
 
+      - name: Download Windows bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: FileSuite-windows-x64
+          path: dist
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             dist/FileSuite
             dist/FileSuite.sha256
+            dist/FileSuite-windows-x64-*.zip
+            dist/FileSuite-windows-x64-*.zip.sha256
           generate_release_notes: true
