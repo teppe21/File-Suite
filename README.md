@@ -152,15 +152,13 @@ python main.py
 
 On Windows, `requirements.txt` also installs `send2trash`, which moves deleted duplicates to the Recycle Bin. On drives that may have no Recycle Bin (USB sticks, network shares), files may be deleted permanently instead; the app warns before this (see the limitations below).
 
-**Standalone build**: `packaging\windows\build.ps1` creates a PyInstaller one-dir bundle and packs it into `dist\FileSuite-windows-x64-v<version>.zip` together with `dist\FileSuite-windows-x64-v<version>.zip.sha256`. The `build` job in the Windows CI workflow runs the same script and uploads both files as the workflow artifact `FileSuite-windows-x64`.
-
-For now the zip is only a CI build artifact. It is not attached to a GitHub Release (`release.yml` still publishes the Linux binary only). Downloading a workflow artifact requires a GitHub sign-in, and artifacts expire after the repository's retention period.
+**Standalone build**: `packaging\windows\build.ps1` creates a PyInstaller one-dir bundle and packs it into `dist\FileSuite-windows-x64-v<version>.zip` together with `dist\FileSuite-windows-x64-v<version>.zip.sha256`. The `build` job in the Windows CI workflow runs the same script and uploads both files as the workflow artifact `FileSuite-windows-x64`, and tagged releases attach both files to the GitHub Release.
 
 **Verifying the download**: the `.sha256` file contains the hash and the zip file name. Compare it with the hash of the zip:
 
 ```powershell
-$expected = (Get-Content .\FileSuite-windows-x64-v1.1.1.zip.sha256).Split(" ")[0]
-$actual = (Get-FileHash -Algorithm SHA256 .\FileSuite-windows-x64-v1.1.1.zip).Hash
+$expected = (Get-Content .\FileSuite-windows-x64-v1.2.0.zip.sha256).Split(" ")[0]
+$actual = (Get-FileHash -Algorithm SHA256 .\FileSuite-windows-x64-v1.2.0.zip).Hash
 $actual -eq $expected   # case-insensitive comparison; should print True
 ```
 
@@ -265,13 +263,13 @@ Every push and pull request is validated through GitHub Actions across:
 
 ## Releases
 
-Releases are published automatically via GitHub Actions whenever a version tag (e.g. `v1.1.1`) is pushed:
+Releases are published automatically via GitHub Actions whenever a version tag (e.g. `v1.2.0`) is pushed:
 
 1. Runs complete lint, security (`bandit` & `pip-audit`), and unit test suites.
 2. Verifies Git tag matches `version.py`.
-3. Compiles standalone Linux binary via `build.sh`.
+3. Compiles the standalone Linux binary via `build.sh` and the Windows zip via `packaging/windows/build.ps1`.
 4. Verifies SHA-256 checksums.
-5. Creates a GitHub Release with attached executable and checksum assets.
+5. Creates a GitHub Release with the Linux binary, the Windows zip and their checksum files attached.
 
 ---
 
