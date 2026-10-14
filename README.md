@@ -3,11 +3,10 @@
 ![Python](https://img.shields.io/badge/Python-3.10%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![CustomTkinter](https://img.shields.io/badge/GUI-CustomTkinter-blue?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(experimental)-FCC624?style=for-the-badge&logo=linux&logoColor=black)
-![Tests](https://img.shields.io/badge/Tests-106%20tests-success?style=for-the-badge)
 ![Security](https://img.shields.io/badge/Security-Bandit%20%7C%20Ruff%20%7C%20pip--audit-success?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-A small, serious, carefully engineered Linux desktop utility for organizing loose files and finding byte-identical duplicates inside a selected directory.
+A small, serious, carefully engineered desktop utility for organizing loose files and finding byte-identical duplicates inside a selected directory. Linux is the primary platform; Windows support is experimental (see [Windows (experimental)](#windows-experimental)).
 
 File Suite is designed around defensive filesystem practices: **preview before mutation, explicit user confirmation, and deterministic collision safety**. It operates locally on loose files within the chosen target folder without descending into nested subdirectories or modifying hidden files.
 
@@ -66,11 +65,12 @@ graph TD
         OPS["operations.py: Plan Generation, Execution & Undo"]
         DUP["duplicates.py: Chunked SHA-256 Engine"]
         CORE["core.py: Path Validation & Categories"]
+        PLAT["platform_utils.py: Linux/Windows Platform Helpers"]
     end
 
-    subgraph Storage ["Linux Environment & Filesystem"]
+    subgraph Storage ["Filesystem (Linux shown)"]
         FS["Root Directory (Non-Recursive)"]
-        TRASH["~/.local/share/Trash (FreeDesktop)"]
+        TRASH["$XDG_DATA_HOME/Trash (FreeDesktop)"]
         XDG["~/.local/share/applications (Desktop Launcher)"]
     end
 
@@ -83,6 +83,10 @@ graph TD
     OPS --> CORE
     DUP --> MOD
     DUP --> CORE
+    OPS --> PLAT
+    DUP --> PLAT
+    CORE --> PLAT
+    UI --> PLAT
     OPS --> FS
     OPS --> TRASH
     DUP --> FS
@@ -97,6 +101,7 @@ graph TD
 | `models.py` | Typed dataclasses for operation plans, items, execution results, duplicate groups, and scan progress. |
 | `operations.py` | Dry-run plan building, TOCTOU containment validation, moves, FreeDesktop trash, and session undo. |
 | `duplicates.py` | Size grouping, chunked SHA-256 hashing, deterministic sorting, and cooperative cancellation. |
+| `platform_utils.py` | Linux/Windows differences: hidden files, link detection, no-clobber moves, Recycle Bin, folder name rules. |
 | `main.py` | Restrained CustomTkinter graphite UI, view router, live progress metrics, and diagnostics. |
 
 ---
@@ -108,9 +113,12 @@ File Suite enforces deterministic constraints before and during execution:
 1. **Non-Recursive Boundary**: Operations apply exclusively to loose files directly inside the active directory. Subdirectories are never descended into, altered, or deleted.
 2. **Pre-Execution Revalidation**: The dry-run preview and execution phases maintain separate trust boundaries. Source file existence, regular file type, and non-symlink status are verified again immediately prior to each move.
 3. **Destination Path Containment**: Every target path is checked against the active root directory. If an intermediate directory was replaced by a symbolic link between preview and execution, the operation is aborted for that item.
-4. **Collision Avoidance**: Target names that collide with existing files or symlinks are suffixed (`file_1.pdf`, `archive_1.tar.gz`) without overwriting existing data.
+4. **Collision Avoidance**: Target names that collide with existing files, symlinks or other files in the same batch are suffixed (`file_1.pdf`, `archive_1.tar.gz`) without overwriting existing data.
 5. **Path Traversal Defense**: User-supplied folder names cannot escape the root boundary (`/`, `\`, `..`, leading `~`, and control characters are rejected).
-6. **FreeDesktop Trash Specification**: Files sent to trash are moved into `~/.local/share/Trash/files` with conforming `.trashinfo` metadata. If the physical move fails, the metadata file is removed to prevent orphaned trash entries.
+6. **FreeDesktop Trash Specification**: Files sent to trash are moved into `$XDG_DATA_HOME/Trash/files` (default `~/.local/share/Trash/files`) with conforming `.trashinfo` metadata. The metadata file is created exclusively, so another application's trash entry is never overwritten; a taken name moves on to the next free one. If the physical move fails, the metadata file is removed to prevent orphaned trash entries.
+7. **No-Clobber Moves**: On Linux a move hard-links the file to its destination and then removes the source, which fails instead of replacing a file that appeared at the destination after the checks. Where hard links are unavailable (another drive, FAT/exFAT) the file is copied into an exclusively created destination and any partial copy is removed on error. On Windows a plain rename already refuses to overwrite.
+8. **A Kept Copy Is Always Left**: Moving or trashing duplicates is refused while every copy of a group is selected. Any copy can be the one kept.
+9. **Stale Scan Protection**: Right before moving or trashing duplicates, each selected file and the group's kept copies are checked again. A selected file whose size, modification time or inode changed since the scan is skipped, and a group with no unchanged kept copy left is skipped entirely. Every skip is written to the Activity Log.
 
 ---
 
@@ -118,7 +126,7 @@ File Suite enforces deterministic constraints before and during execution:
 
 For transparency and engineering clarity:
 
-- **Linux Platform**: File Suite is tailored for Linux desktop environments (X11 and Wayland) and adheres to XDG and FreeDesktop standards.
+- **Platforms**: Linux desktop environments (X11 and Wayland) are the primary target and follow XDG and FreeDesktop standards. Windows support is experimental; see its limitations below.
 - **Race-Condition Surface**: While File Suite performs strict pre-execution revalidation, standard OS filesystem abstractions cannot guarantee absolute race-condition immunity against concurrent malicious processes running in the same directory.
 - **Hard Links**: Duplicate size metrics account for shared inodes so physical disk blocks are not overcounted. Deleting a hard-linked duplicate removes that directory entry and decrements the inode link count, but only frees physical disk blocks when the last link is unlinked.
 - **Session-Based Undo**: Undo is tracked in-memory for the current application session. Files sent to system trash must be restored via your desktop file manager's trash interface.
@@ -232,7 +240,7 @@ File Suite will appear in your application launcher (under System/Utilities) and
 The repository includes a headless unit test suite covering path safety, operation plans, collision handling, duplicate hashing, and undo semantics:
 
 ```bash
-# Run all unit tests (106; Windows-only and Linux-only tests are skipped on the other platform)
+# Run all unit tests (Windows-only and Linux-only tests are skipped on the other platform)
 python3 -m unittest discover -s tests -v
 
 # Run Ruff linter
@@ -299,14 +307,20 @@ File-Suite/
 ├── requirements.txt         # Runtime dependencies
 ├── version.py               # Single source of truth for versioning
 └── tests/
-    ├── test_core.py         # Path validation & renaming tests (22 tests)
-    ├── test_duplicates.py   # Hashing, deterministic order, hardlink tests (12 tests)
-    ├── test_models.py       # Dataclass & metric calculation tests (7 tests)
-    ├── test_operations.py   # Move execution, containment, symlink, trash tests (19 tests)
-    ├── test_platform_utils.py # Platform helper tests (34 tests)
-    ├── test_version.py      # Version consistency and wiring tests (3 tests)
-    └── test_windows.py      # Windows filesystem tests, skipped elsewhere (9 tests)
+    ├── test_core.py         # Path validation & renaming tests
+    ├── test_duplicates.py   # Hashing, deterministic order, hardlink tests
+    ├── test_models.py       # Dataclass & metric calculation tests
+    ├── test_operations.py   # Move execution, containment, symlink, trash, stale-scan tests
+    ├── test_platform_utils.py # Platform helper and no-clobber move tests
+    ├── test_version.py      # Version consistency and wiring tests
+    └── test_windows.py      # Windows filesystem tests, skipped elsewhere
 ```
+
+---
+
+## Development process
+
+File Suite is developed with AI assistance. Every pull request and every push to `main` runs the unit tests on Linux and Windows, plus Ruff, Bandit and pip-audit, in GitHub Actions. The author reviews each change before it is merged.
 
 ---
 
