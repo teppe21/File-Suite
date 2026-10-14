@@ -19,6 +19,8 @@ from core import (
     resolve_destination,
 )
 from models import (
+    DuplicateFile,
+    DuplicateGroup,
     ExecutionResult,
     MoveRecord,
     OperationItem,
@@ -521,6 +523,55 @@ def move_to_system_trash(
             except OSError:
                 pass
         return False, f"Failed to trash '{file_path.name}': {exc}"
+
+
+def _changed_since_scan(f: DuplicateFile) -> str | None:
+    """Return why ``f`` no longer matches what the scan saw, or None if unchanged."""
+    try:
+        st = f.path.stat()
+    except OSError as exc:
+        return f"no longer accessible ({exc.strerror or exc})"
+    if st.st_size != f.size:
+        return "size changed since scan"
+    if f.mtime_ns is None or st.st_mtime_ns != f.mtime_ns:
+        return "modified since scan"
+    if f.inode is not None and st.st_ino != f.inode:
+        return "replaced since scan"
+    return None
+
+
+def filter_unchanged_duplicates(
+    groups: list[DuplicateGroup],
+) -> tuple[list[Path], list[str]]:
+    """
+    Re-stat selected files and their kept copies right before acting on them.
+
+    A selected file that changed since the scan is skipped. A whole group is
+    skipped when none of its unselected (kept) copies still exists unchanged,
+    so the action can never remove the last good copy.
+
+    Returns (paths safe to act on, one skip message per skipped file).
+    """
+    safe: list[Path] = []
+    skips: list[str] = []
+    for group in groups:
+        selected = [f for f in group.files if f.selected]
+        if not selected:
+            continue
+        kept = [f for f in group.files if not f.selected]
+        if not any(_changed_since_scan(f) is None for f in kept):
+            skips.extend(
+                f"{f.path.name}: no unchanged kept copy remains in its group"
+                for f in selected
+            )
+            continue
+        for f in selected:
+            reason = _changed_since_scan(f)
+            if reason:
+                skips.append(f"{f.path.name}: {reason}")
+            else:
+                safe.append(f.path)
+    return safe, skips
 
 
 def build_duplicate_move_plan(

@@ -30,6 +30,7 @@ from models import (
     OperationPlan,
     ScanProgress,
     clear_duplicate_selection,
+    groups_without_kept_copy,
     select_all_duplicates,
     update_duplicate_groups_after_removal,
 )
@@ -37,6 +38,7 @@ from operations import (
     build_duplicate_move_plan,
     build_organization_plan,
     execute_operation_plan,
+    filter_unchanged_duplicates,
     move_to_system_trash,
     undo_last_operation,
 )
@@ -1035,6 +1037,31 @@ class FileOrganizerApp(ctk.CTk):
                     selected.append(f.path)
         return selected
 
+    def _refuse_if_no_kept_copy(self) -> bool:
+        """Show an error and return True when some group would lose every copy."""
+        unkept = groups_without_kept_copy(self.duplicate_groups)
+        if not unkept:
+            return False
+        # Number groups the way the results list does ("Group N").
+        names = "\n".join(
+            f"• Group {idx}: {g.files[0].path.name}"
+            for idx, g in enumerate(self.duplicate_groups, 1)
+            if g in unkept
+        )
+        messagebox.showerror(
+            "Every Copy Selected",
+            f"Every copy is selected in these group(s):\n{names}\n\n"
+            "Leave at least one copy unselected in each group to keep it.",
+        )
+        return True
+
+    def _unchanged_selection(self) -> list[Path]:
+        """Re-check selected files against the scan and log every skipped file."""
+        safe, skips = filter_unchanged_duplicates(self.duplicate_groups)
+        for reason in skips:
+            self.log("WARN", f"Skipped {reason}")
+        return safe
+
     def _move_selected_duplicates(self):
         if self._is_executing:
             return
@@ -1054,6 +1081,8 @@ class FileOrganizerApp(ctk.CTk):
         if not selected:
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to isolate.")
             return
+        if self._refuse_if_no_kept_copy():
+            return
 
         if not messagebox.askyesno(
             "Confirm Isolation",
@@ -1063,6 +1092,7 @@ class FileOrganizerApp(ctk.CTk):
 
         self._is_executing = True
         try:
+            selected = self._unchanged_selection()
             ok, plan, err = build_duplicate_move_plan(selected, self.current_path, "Duplicates")
             if not ok:
                 messagebox.showerror("Error", err or "Failed to build move plan")
@@ -1126,6 +1156,8 @@ class FileOrganizerApp(ctk.CTk):
         if not selected:
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to trash.")
             return
+        if self._refuse_if_no_kept_copy():
+            return
 
         # The scan is non-recursive, so every selected file is on this folder's drive.
         may_be_permanent = trash_may_be_permanent(self.duplicate_scan_dir)
@@ -1140,7 +1172,7 @@ class FileOrganizerApp(ctk.CTk):
             successful_paths: set[Path] = set()
             failed_count = 0
 
-            for f in selected:
+            for f in self._unchanged_selection():
                 ok, err = move_to_system_trash(f)
                 if ok:
                     successful_paths.add(f)

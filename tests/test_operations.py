@@ -10,11 +10,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from duplicates import scan_duplicates
 from models import ExecutionResult, OperationStatus
 from operations import (
     build_duplicate_move_plan,
     build_organization_plan,
     execute_operation_plan,
+    filter_unchanged_duplicates,
     move_to_system_trash,
     undo_last_operation,
 )
@@ -345,6 +347,62 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertEqual(undone, 0)
         self.assertEqual(failed, 0)
         self.assertIn("No operations to undo.", errors)
+
+
+class StaleScanTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        for name in ("a.txt", "b.txt", "c.txt"):
+            (self.target / name).write_text("same")
+        [self.group] = scan_duplicates(self.target)  # a.txt kept, b.txt and c.txt selected
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def bump_mtime(self, name):
+        st = (self.target / name).stat()
+        os.utime(self.target / name, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+
+    def test_unchanged_files_pass(self):
+        safe, skips = filter_unchanged_duplicates([self.group])
+        self.assertEqual(sorted(p.name for p in safe), ["b.txt", "c.txt"])
+        self.assertEqual(skips, [])
+
+    def test_modified_selected_file_skipped(self):
+        self.bump_mtime("b.txt")
+        (self.target / "c.txt").write_text("same plus more")
+        safe, skips = filter_unchanged_duplicates([self.group])
+        self.assertEqual(safe, [])
+        self.assertIn("b.txt: modified since scan", skips)
+        self.assertIn("c.txt: size changed since scan", skips)
+
+    def test_group_skipped_when_kept_copy_changed_or_gone(self):
+        self.bump_mtime("a.txt")
+        safe, skips = filter_unchanged_duplicates([self.group])
+        self.assertEqual(safe, [])
+        self.assertEqual(len(skips), 2)
+        self.assertTrue(all("no unchanged kept copy" in s for s in skips))
+
+        (self.target / "a.txt").unlink()
+        self.assertEqual(filter_unchanged_duplicates([self.group])[0], [])
+
+    def test_other_kept_copy_is_enough(self):
+        # Keeper is c.txt instead of the default original
+        for f in self.group.files:
+            f.selected = f.path.name != "c.txt"
+        safe, _ = filter_unchanged_duplicates([self.group])
+        self.assertEqual(sorted(p.name for p in safe), ["a.txt", "b.txt"])
+
+    def test_replaced_file_skipped(self):
+        (self.target / "b.txt").unlink()
+        (self.target / "b.txt").write_text("same")
+        b = next(f for f in self.group.files if f.path.name == "b.txt")
+        b.mtime_ns = (self.target / "b.txt").stat().st_mtime_ns  # isolate the inode check
+        b.inode = (b.inode or 0) + 1
+        safe, skips = filter_unchanged_duplicates([self.group])
+        self.assertEqual([p.name for p in safe], ["c.txt"])
+        self.assertIn("b.txt: replaced since scan", skips)
 
 
 class SystemTrashTests(unittest.TestCase):

@@ -18,6 +18,7 @@ from models import (
     OperationType,
     ScanProgress,
     clear_duplicate_selection,
+    groups_without_kept_copy,
     select_all_duplicates,
     update_duplicate_groups_after_removal,
 )
@@ -110,6 +111,21 @@ class ModelsTests(unittest.TestCase):
         self.assertFalse(f_orig.selected)
         self.assertFalse(f_dup1.selected)
         self.assertFalse(f_dup2.selected)
+
+    def test_groups_without_kept_copy(self):
+        def group(gid, *selected):
+            files = [
+                DuplicateFile(path=Path(f"/tmp/{gid}{i}.txt"), size=1, is_original=(i == 0), selected=sel)
+                for i, sel in enumerate(selected)
+            ]
+            return DuplicateGroup(group_id=gid, sha256=gid, size=1, files=files)
+
+        all_selected = group("a", True, True)
+        original_kept = group("b", False, True)
+        other_kept = group("c", True, False)  # user picked a different keeper
+        nothing_selected = group("d", False, False)
+        groups = [all_selected, original_kept, other_kept, nothing_selected]
+        self.assertEqual(groups_without_kept_copy(groups), [all_selected])
 
     def test_update_duplicate_groups_after_removal(self):
         p1 = Path("/tmp/f1.txt")

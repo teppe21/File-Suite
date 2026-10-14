@@ -188,10 +188,12 @@ def scan_duplicates(
                     # st_ino == 0 means "unknown" (FAT32/exFAT, some network shares)
                     f_inode = st.st_ino or None
                     f_dev = st.st_dev
+                    f_mtime = st.st_mtime_ns
                 except OSError:
                     f_size = single_size
                     f_inode = None
                     f_dev = None
+                    f_mtime = None
 
                 dup_files.append(
                     DuplicateFile(
@@ -201,6 +203,7 @@ def scan_duplicates(
                         selected=(i > 0),
                         inode=f_inode,
                         device=f_dev,
+                        mtime_ns=f_mtime,
                     )
                 )
 
