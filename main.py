@@ -28,6 +28,7 @@ from models import (
     DuplicateGroup,
     ExecutionResult,
     OperationPlan,
+    OperationStatus,
     ScanProgress,
     clear_duplicate_selection,
     groups_without_kept_copy,
@@ -653,9 +654,12 @@ class FileOrganizerApp(ctk.CTk):
         self._is_executing = True
         try:
             self.set_status("PROCESSING", "Undoing file moves...", THEME["accent"])
-            undone, failed, errors = undo_last_operation(res)
+            undone, failed, errors, notes = undo_last_operation(res)
 
             self._update_undo_button_state()
+
+            for note in notes:
+                self.log("WARN", note)
 
             if undone > 0:
                 self.log("SUCCESS", f"Undo completed: restored {undone} file(s) to original location.")
@@ -770,7 +774,8 @@ class FileOrganizerApp(ctk.CTk):
             return
 
         self._is_scanning = True
-        self._cancel_scan.clear()
+        # A fresh event per scan, so a stale worker can never be revived
+        self._cancel_scan = threading.Event()
         self._scan_generation += 1
         current_gen = self._scan_generation
         target_dir = self.current_path
@@ -785,7 +790,7 @@ class FileOrganizerApp(ctk.CTk):
 
         worker = threading.Thread(
             target=self._duplicate_scan_worker,
-            args=(target_dir, current_gen),
+            args=(target_dir, current_gen, self._cancel_scan),
             daemon=True,
         )
         worker.start()
@@ -797,14 +802,14 @@ class FileOrganizerApp(ctk.CTk):
             self.set_status("CANCELLED", "Cancelling scan...", THEME["warning"])
             self.log("WARN", "User requested duplicate scan cancellation.")
 
-    def _duplicate_scan_worker(self, target_dir: Path, gen: int):
+    def _duplicate_scan_worker(self, target_dir: Path, gen: int, cancel_event: threading.Event):
         def on_prog(progress: ScanProgress):
             self._safe_after(self._on_duplicate_scan_progress, progress, gen)
 
         try:
             groups = scan_duplicates(
                 target_dir=target_dir,
-                cancel_event=self._cancel_scan,
+                cancel_event=cancel_event,
                 on_progress=on_prog,
             )
             self._safe_after(self._on_duplicate_scan_complete, groups, target_dir, gen)
@@ -1097,6 +1102,11 @@ class FileOrganizerApp(ctk.CTk):
             if not ok:
                 messagebox.showerror("Error", err or "Failed to build move plan")
                 return
+            if plan.skipped_count:
+                self.log("WARN", f"Skipped {plan.skipped_count} selected file(s):")
+                for item in plan.items:
+                    if item.status == OperationStatus.SKIPPED:
+                        self.log("WARN", f"  {item.source.name} — {item.skip_reason}")
 
             result = execute_operation_plan(plan)
             self.last_execution_result = result
@@ -1335,6 +1345,12 @@ class FileOrganizerApp(ctk.CTk):
         self._scan_generation += 1
         if self._is_scanning:
             self._cancel_scan.set()
+            # The stale worker's callbacks are ignored, so reset the scan UI here
+            self._is_scanning = False
+            if hasattr(self, "scan_dup_btn") and self.scan_dup_btn.winfo_exists():
+                self.scan_dup_btn.configure(state="normal")
+                self.cancel_scan_btn.configure(state="disabled")
+                self.dup_progress_bar.grid_remove()
         self.current_plan = None
         self.duplicate_groups.clear()
         self.duplicate_scan_dir = None

@@ -103,6 +103,19 @@ class OperationPlanTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIsNotNone(err)
 
+    def test_plan_destinations_unique_within_batch(self):
+        (self.target / "Images").mkdir()
+        (self.target / "Images" / "a.jpg").write_text("existing")
+        (self.target / "a.jpg").write_text("one")
+        (self.target / "a_1.jpg").write_text("two")
+
+        ok, plan, _ = build_organization_plan(self.target, {".jpg"})
+        self.assertTrue(ok)
+        dests = [item.destination for item in plan.executable_items]
+        self.assertEqual(len(dests), 2)
+        self.assertEqual(len(set(dests)), 2, f"colliding destinations: {dests}")
+        self.assertTrue(all(item.is_collision for item in plan.executable_items))
+
 
 class ExecutionAndUndoTests(unittest.TestCase):
     def setUp(self):
@@ -131,7 +144,7 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertTrue((self.target / "Documents" / "f2.txt").exists())
 
         # Undo
-        undone, failed, errors = undo_last_operation(result)
+        undone, failed, errors, _ = undo_last_operation(result)
         self.assertEqual(undone, 2)
         self.assertEqual(failed, 0)
         self.assertEqual(len(errors), 0)
@@ -173,15 +186,17 @@ class ExecutionAndUndoTests(unittest.TestCase):
         f.write_text("brand new content at root")
 
         # Undo must NOT overwrite the new file
-        undone, failed, errors = undo_last_operation(result)
+        undone, failed, errors, notes = undo_last_operation(result)
         self.assertEqual(undone, 1)
         self.assertEqual(failed, 0)
+        self.assertEqual(errors, [])  # a rename is a note, not an error
         # Original file at root is intact
         self.assertEqual(f.read_text(), "brand new content at root")
         # Restored file was placed at collision-safe location (e.g. file_1.txt)
         self.assertTrue((self.target / "file_1.txt").exists())
         self.assertEqual((self.target / "file_1.txt").read_text(), "original content")
-        self.assertTrue(any("occupied" in err for err in errors))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("restored as 'file_1.txt'", notes[0])
 
     def test_toctou_source_deleted_before_execution(self):
         f = self.target / "ghost.txt"
@@ -195,6 +210,36 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertEqual(result.success_count, 0)
         self.assertEqual(result.failure_count, 1)
         self.assertTrue(result.failed_moves[0][2].startswith("Source file no longer exists"))
+
+    def test_duplicate_move_plan_suffixed_name_collision(self):
+        # Used to loop forever: a.jpg is planned as a_1.jpg, which a_1.jpg also wants
+        (self.target / "Duplicates").mkdir()
+        (self.target / "Duplicates" / "a.jpg").write_text("existing")
+        f1 = self.target / "a.jpg"
+        f2 = self.target / "a_1.jpg"
+        f1.write_text("data")
+        f2.write_text("data")
+
+        ok, plan, _ = build_duplicate_move_plan([f1, f2], self.target, "Duplicates")
+        self.assertTrue(ok)
+        dests = {item.destination for item in plan.executable_items}
+        self.assertEqual(len(dests), 2)
+
+    def test_duplicate_move_plan_records_skips(self):
+        valid = self.target / "valid.jpg"
+        valid.write_text("data")
+        missing = self.target / "missing.jpg"
+        (self.target / "Duplicates").mkdir()
+        inside = self.target / "Duplicates" / "inside.jpg"
+        inside.write_text("data")
+
+        ok, plan, _ = build_duplicate_move_plan([valid, missing, inside], self.target, "Duplicates")
+        self.assertTrue(ok)
+        self.assertEqual(plan.affected_count, 1)
+        self.assertEqual(plan.skipped_count, 2)
+        reasons = {item.source.name: item.skip_reason for item in plan.items if item.skip_reason}
+        self.assertIn("not a regular file", reasons["missing.jpg"])
+        self.assertIn("Already inside 'Duplicates'", reasons["inside.jpg"])
 
     def test_duplicate_move_plan_and_undo(self):
         f1 = self.target / "dup1.jpg"
@@ -210,7 +255,7 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertEqual(result.success_count, 2)
         self.assertTrue((self.target / "Duplicates" / "dup1.jpg").exists())
 
-        undone, failed, _ = undo_last_operation(result)
+        undone, failed, _, _ = undo_last_operation(result)
         self.assertEqual(undone, 2)
         self.assertTrue(f1.exists())
         self.assertTrue(f2.exists())
@@ -306,7 +351,7 @@ class ExecutionAndUndoTests(unittest.TestCase):
         except OSError:
             self.skipTest("Symlinks not supported")
 
-        undone, failed, errors = undo_last_operation(result)
+        undone, failed, errors, _ = undo_last_operation(result)
         self.assertEqual(undone, 0)
         self.assertEqual(failed, 1)
         self.assertTrue(any("symbolic link" in err for err in errors))
@@ -326,7 +371,7 @@ class ExecutionAndUndoTests(unittest.TestCase):
         # Delete one destination file to force partial undo failure
         (self.target / "Documents" / "f1.txt").unlink()
 
-        undone, failed, _ = undo_last_operation(result)
+        undone, failed, _, _ = undo_last_operation(result)
         self.assertEqual(undone, 1)
         self.assertEqual(failed, 1)
         self.assertTrue(f2.exists())
@@ -336,14 +381,14 @@ class ExecutionAndUndoTests(unittest.TestCase):
         self.assertEqual(len(result.successful_moves), 1)
 
         # Repeated undo without fixing f1 still fails gracefully
-        undone2, failed2, _ = undo_last_operation(result)
+        undone2, failed2, _, _ = undo_last_operation(result)
         self.assertEqual(undone2, 0)
         self.assertEqual(failed2, 1)
 
     def test_repeated_undo_no_op(self):
         """Calling undo with no successful moves returns clear no-op message."""
         res = ExecutionResult(plan_target_dir=self.target, successful_moves=[])
-        undone, failed, errors = undo_last_operation(res)
+        undone, failed, errors, _ = undo_last_operation(res)
         self.assertEqual(undone, 0)
         self.assertEqual(failed, 0)
         self.assertIn("No operations to undo.", errors)
@@ -467,6 +512,42 @@ class SystemTrashTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Refusing to trash symbolic link", err or "")
         self.assertTrue(symlink_file.exists())
+
+    def test_trash_never_overwrites_foreign_trashinfo(self):
+        # Another app already owns the "dup.txt" entry name, but its file is gone
+        info_dir = self.trash_dir / "info"
+        info_dir.mkdir(parents=True)
+        (info_dir / "dup.txt.trashinfo").write_text("foreign entry")
+        f = self.target / "dup.txt"
+        f.write_text("mine")
+
+        ok, _ = move_to_system_trash(f, trash_dir=self.trash_dir)
+        self.assertTrue(ok)
+        self.assertEqual((info_dir / "dup.txt.trashinfo").read_text(), "foreign entry")
+        self.assertEqual((self.trash_dir / "files" / "dup_1.txt").read_text(), "mine")
+        self.assertIn("Path=", (info_dir / "dup_1.txt.trashinfo").read_text())
+        self.assertFalse((self.trash_dir / "files" / "dup.txt").exists())
+
+    def test_trash_honors_xdg_data_home(self):
+        f = self.target / "x.txt"
+        f.write_text("data")
+        xdg = self.target / "xdg"
+        with patch("operations.IS_WINDOWS", False), patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg)}):
+            ok, err = move_to_system_trash(f)
+        self.assertTrue(ok, err)
+        self.assertTrue((xdg / "Trash" / "files" / "x.txt").exists())
+        self.assertTrue((xdg / "Trash" / "info" / "x.txt.trashinfo").exists())
+
+    def test_trash_ignores_relative_xdg_data_home(self):
+        f = self.target / "x.txt"
+        f.write_text("data")
+        home = self.target / "home"
+        with patch("operations.IS_WINDOWS", False), patch.dict(
+            os.environ, {"XDG_DATA_HOME": "relative/path"}
+        ), patch("operations.Path.home", return_value=home):
+            ok, err = move_to_system_trash(f)
+        self.assertTrue(ok, err)
+        self.assertTrue((home / ".local" / "share" / "Trash" / "files" / "x.txt").exists())
 
     def test_trash_move_failure_cleans_metadata(self):
         f = self.target / "fail.txt"
