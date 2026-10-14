@@ -472,8 +472,8 @@ class SystemTrashTests(unittest.TestCase):
         f = self.target / "fail.txt"
         f.write_text("fail data")
 
-        # Mock shutil.move to fail, simulating failure between metadata creation and file move
-        with patch("shutil.move", side_effect=OSError("Disk full")):
+        # Make the move fail, simulating failure between metadata creation and file move
+        with patch("operations.move_file", side_effect=OSError("Disk full")):
             ok, err = move_to_system_trash(f, trash_dir=self.trash_dir)
 
         self.assertFalse(ok)

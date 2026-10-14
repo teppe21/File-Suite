@@ -7,7 +7,9 @@ Windows branches are exercised on every OS by patching ``IS_WINDOWS`` and the
 
 from __future__ import annotations
 
+import errno
 import ntpath
+import os
 import stat
 import sys
 import tempfile
@@ -245,15 +247,18 @@ class MoveAndTrashTests(unittest.TestCase):
 
     def test_move_file_dispatch(self):
         src, dst = self.target / "a.txt", self.target / "b.txt"
-        with patch("platform_utils.os.rename") as rename, patch("platform_utils.shutil.move") as move:
+        with patch("platform_utils.os.rename") as rename, patch(
+            "platform_utils.os.link"
+        ) as link, patch("platform_utils.os.unlink") as unlink:
             with patch("platform_utils.IS_WINDOWS", True):
                 move_file(src, dst)
             rename.assert_called_once_with(src, dst)
-            move.assert_not_called()  # no copy fallback on Windows
+            link.assert_not_called()  # no copy fallback on Windows
             rename.reset_mock()
             with patch("platform_utils.IS_WINDOWS", False):
                 move_file(src, dst)
-            move.assert_called_once_with(str(src), str(dst))
+            link.assert_called_once_with(src, dst, follow_symlinks=False)
+            unlink.assert_called_once_with(src)
             rename.assert_not_called()
 
     def test_move_file_windows_errors_propagate(self):
@@ -305,6 +310,87 @@ class MoveAndTrashTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(fake.call_count, 2)
         self.assertTrue((self.target / "Trash" / "files" / "a.txt").exists())
+
+
+@unittest.skipIf(ON_WINDOWS, "hard-link moves are the Linux code path")
+class LinuxNoClobberMoveTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        self.src = self.target / "a.txt"
+        self.src.write_text("source")
+        self.dst = self.target / "b.txt"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def assert_untouched(self):
+        self.assertEqual(self.src.read_text(), "source")
+        self.assertEqual(self.dst.read_text(), "existing")
+
+    def test_existing_destination_is_never_replaced(self):
+        self.dst.write_text("existing")
+        with self.assertRaises(FileExistsError):
+            move_file(self.src, self.dst)
+        self.assert_untouched()
+
+    def test_destination_created_after_check_is_not_overwritten(self):
+        ok, plan, _ = build_organization_plan(self.target, {".txt"}, "Out")
+        self.assertTrue(ok)
+        self.dst = plan.items[0].destination
+
+        def racing_move(src, dst):
+            dst.write_text("existing")  # another program wins the race
+            move_file(src, dst)
+
+        with patch("operations.move_file", side_effect=racing_move):
+            result = execute_operation_plan(plan)
+        self.assertEqual(result.success_count, 0)
+        self.assertEqual(result.failure_count, 1)
+        self.assert_untouched()
+
+    def test_unlink_failure_removes_new_link(self):
+        real_unlink = os.unlink
+
+        def fake_unlink(path):
+            if Path(path) == self.src:
+                raise PermissionError(errno.EACCES, "denied")
+            real_unlink(path)
+
+        with patch("platform_utils.os.unlink", side_effect=fake_unlink), self.assertRaises(PermissionError):
+            move_file(self.src, self.dst)
+        self.assertEqual(self.src.read_text(), "source")
+        self.assertFalse(self.dst.exists())
+
+    def test_copy_fallback_without_hard_links(self):
+        os.utime(self.src, ns=(1_000_000_000, 2_000_000_000))
+        exdev = OSError(errno.EXDEV, "Invalid cross-device link")
+        with patch("platform_utils.os.link", side_effect=exdev):
+            move_file(self.src, self.dst)
+        self.assertFalse(self.src.exists())
+        self.assertEqual(self.dst.read_text(), "source")
+        self.assertEqual(self.dst.stat().st_mtime_ns, 2_000_000_000)
+
+    def test_copy_fallback_never_replaces_or_leaves_partial_files(self):
+        exdev = OSError(errno.EXDEV, "Invalid cross-device link")
+        self.dst.write_text("existing")
+        with patch("platform_utils.os.link", side_effect=exdev), self.assertRaises(FileExistsError):
+            move_file(self.src, self.dst)
+        self.assert_untouched()
+
+        self.dst.unlink()
+        with patch("platform_utils.os.link", side_effect=exdev), patch(
+            "platform_utils.shutil.copyfileobj", side_effect=OSError(errno.ENOSPC, "No space")
+        ), self.assertRaises(OSError):
+            move_file(self.src, self.dst)
+        self.assertEqual(self.src.read_text(), "source")
+        self.assertFalse(self.dst.exists())
+
+    def test_other_link_errors_propagate(self):
+        with patch("platform_utils.os.link", side_effect=PermissionError(errno.EACCES, "denied")), self.assertRaises(PermissionError):
+            move_file(self.src, self.dst)
+        self.assertTrue(self.src.exists())
+        self.assertFalse(self.dst.exists())
 
 
 class CloudPlaceholderCallSiteTests(unittest.TestCase):

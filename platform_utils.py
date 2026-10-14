@@ -8,6 +8,8 @@ import any other project module.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
 import shutil
 import stat
@@ -131,18 +133,57 @@ def windows_name_problem(name: str) -> str | None:
 # File operations
 # ---------------------------------------------------------------------------
 
+# os.link errors meaning "hard links unavailable here" (other drive, FAT/exFAT)
+_NO_HARDLINK_ERRNOS = {errno.EXDEV, errno.EPERM, errno.ENOTSUP, errno.EMLINK}
+
+
 def move_file(src: Path, dst: Path) -> None:
     """
-    Move ``src`` to ``dst``. Errors propagate as ``OSError``.
+    Move ``src`` to ``dst`` without ever replacing an existing ``dst``.
+    Errors propagate as ``OSError`` (``FileExistsError`` if ``dst`` exists).
 
     On Windows a plain rename is used with no copy fallback: when another
     program has the file open, ``shutil.move`` would copy it and then fail
     to delete the source, leaving a stray copy behind.
+
+    On Linux ``rename`` silently replaces ``dst``, so the file is hard-linked
+    to ``dst`` (atomic, fails if ``dst`` exists) and then unlinked from
+    ``src``. Where hard links are unavailable it is copied into an
+    exclusively created ``dst`` instead.
     """
     if IS_WINDOWS:
         os.rename(src, dst)
-    else:
-        shutil.move(str(src), str(dst))
+        return
+
+    try:
+        os.link(src, dst, follow_symlinks=False)
+    except OSError as exc:
+        if exc.errno not in _NO_HARDLINK_ERRNOS:
+            raise
+        _copy_then_unlink(src, dst)
+        return
+
+    try:
+        os.unlink(src)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(dst)
+        raise
+
+
+def _copy_then_unlink(src: Path, dst: Path) -> None:
+    """Copy ``src`` into a new ``dst``, then remove ``src``; never leaves a partial ``dst``."""
+    with open(src, "rb") as fin:
+        fout = open(dst, "xb")  # FileExistsError here leaves dst untouched
+        try:
+            with fout:
+                shutil.copyfileobj(fin, fout)
+            shutil.copystat(src, dst)
+            os.unlink(src)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(dst)
+            raise
 
 
 def trash_windows(path: Path) -> tuple[bool, str | None]:

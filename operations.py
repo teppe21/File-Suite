@@ -8,7 +8,6 @@ behavior, TOCTOU safety, symlink rejection, and reliable undo capability.
 from __future__ import annotations
 
 import datetime
-import shutil
 import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
@@ -514,7 +513,7 @@ def move_to_system_trash(
             fh.write(info_content)
         info_created = True
 
-        shutil.move(str(file_path), str(dest_path))
+        move_file(file_path, dest_path)
         return True, None
     except OSError as exc:
         if info_created:
