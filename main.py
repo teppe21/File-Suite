@@ -1,8 +1,9 @@
 """
-File Suite — Modern Linux Desktop Organizer & Deduplication Utility.
+File Suite — Desktop File Organizer & Deduplication Utility.
 
 A polished, secure, and deterministic utility for organizing files and finding
-duplicates inside a selected Linux directory.
+duplicates inside a selected directory. Linux is the primary platform;
+Windows support is experimental.
 """
 
 from __future__ import annotations
@@ -1022,11 +1023,6 @@ class FileOrganizerApp(ctk.CTk):
                     ).pack(side="left")
 
     def _select_all_duplicates(self):
-        select_all_duplicates(self.duplicate_groups)
-        self._render_duplicate_groups()
-
-    def _select_originals_only(self):
-        """Keep original preserved (unselected), select all redundant copies."""
         select_all_duplicates(self.duplicate_groups)
         self._render_duplicate_groups()
 

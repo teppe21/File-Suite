@@ -156,10 +156,10 @@ def scan_duplicates(
             progress.files_skipped += 1
             continue
 
-        hash_map.setdefault(file_hash, []).append(file_path)
-
-        # Count groups found so far
-        progress.groups_found = sum(1 for flist in hash_map.values() if len(flist) >= 2)
+        matches = hash_map.setdefault(file_hash, [])
+        matches.append(file_path)
+        if len(matches) == 2:  # this hash just became a duplicate group
+            progress.groups_found += 1
         if on_progress:
             on_progress(progress)
 
