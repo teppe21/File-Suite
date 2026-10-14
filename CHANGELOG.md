@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Hard-link accounting treats inode `0` as unknown, so files on filesystems that report no inode numbers are no longer counted as hard links of each other.
+- New application icon.
 
 ---
 
