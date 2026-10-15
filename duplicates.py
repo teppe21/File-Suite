@@ -156,10 +156,10 @@ def scan_duplicates(
             progress.files_skipped += 1
             continue
 
-        hash_map.setdefault(file_hash, []).append(file_path)
-
-        # Count groups found so far
-        progress.groups_found = sum(1 for flist in hash_map.values() if len(flist) >= 2)
+        matches = hash_map.setdefault(file_hash, [])
+        matches.append(file_path)
+        if len(matches) == 2:  # this hash just became a duplicate group
+            progress.groups_found += 1
         if on_progress:
             on_progress(progress)
 
@@ -188,10 +188,12 @@ def scan_duplicates(
                     # st_ino == 0 means "unknown" (FAT32/exFAT, some network shares)
                     f_inode = st.st_ino or None
                     f_dev = st.st_dev
+                    f_mtime = st.st_mtime_ns
                 except OSError:
                     f_size = single_size
                     f_inode = None
                     f_dev = None
+                    f_mtime = None
 
                 dup_files.append(
                     DuplicateFile(
@@ -201,6 +203,7 @@ def scan_duplicates(
                         selected=(i > 0),
                         inode=f_inode,
                         device=f_dev,
+                        mtime_ns=f_mtime,
                     )
                 )
 

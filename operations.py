@@ -8,7 +8,7 @@ behavior, TOCTOU safety, symlink rejection, and reliable undo capability.
 from __future__ import annotations
 
 import datetime
-import shutil
+import os
 import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +19,8 @@ from core import (
     resolve_destination,
 )
 from models import (
+    DuplicateFile,
+    DuplicateGroup,
     ExecutionResult,
     MoveRecord,
     OperationItem,
@@ -67,6 +69,7 @@ def build_organization_plan(
         validated_custom_dest = res  # type: ignore[assignment]
 
     plan = OperationPlan(target_dir=target_dir)
+    planned_destinations: set[Path] = set()
 
     try:
         entries = list(target_dir.iterdir())
@@ -170,14 +173,9 @@ def build_organization_plan(
             dest_dir = target_dir / cat_label
 
         # Collision detection against existing files or previously planned items in this plan
-        candidate_dest = dest_dir / item.name
-        is_collision = candidate_dest.exists()
-
-        final_dest = (
-            build_collision_safe_path(dest_dir, item.name)
-            if is_collision
-            else candidate_dest
-        )
+        final_dest = build_collision_safe_path(dest_dir, item.name, planned_destinations)
+        is_collision = final_dest != dest_dir / item.name
+        planned_destinations.add(final_dest)
 
         plan.items.append(
             OperationItem(
@@ -337,13 +335,7 @@ def execute_operation_plan(
         # TOCTOU check 6: Avoid overwriting existing destination or symlink
         actual_dest = dest
         if actual_dest.exists() or actual_dest.is_symlink() or actual_dest in allocated_destinations:
-            actual_dest = build_collision_safe_path(dest_dir, src.name)
-            while (
-                actual_dest in allocated_destinations
-                or actual_dest.exists()
-                or actual_dest.is_symlink()
-            ):
-                actual_dest = build_collision_safe_path(dest_dir, actual_dest.name)
+            actual_dest = build_collision_safe_path(dest_dir, src.name, allocated_destinations)
 
         allocated_destinations.add(actual_dest)
 
@@ -363,7 +355,7 @@ def execute_operation_plan(
     return result
 
 
-def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
+def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str], list[str]]:
     """
     Reverse the successful moves recorded in an ExecutionResult.
 
@@ -375,23 +367,25 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
       - Handles partial failure transparently and retains only un-restored records for retry.
 
     Returns:
-      (undone_count: int, failed_count: int, error_messages: list[str])
+      (undone_count: int, failed_count: int, error_messages: list[str],
+       notes: list[str]) where notes report files restored under a new name.
     """
     if not result.undo_supported:
-        return 0, 0, ["Undo is not supported for this operation (e.g. system trash)."]
+        return 0, 0, ["Undo is not supported for this operation (e.g. system trash)."], []
 
     if not result.successful_moves:
-        return 0, 0, ["No operations to undo."]
+        return 0, 0, ["No operations to undo."], []
 
     undone_count = 0
     failed_count = 0
     errors: list[str] = []
+    notes: list[str] = []
     retained_moves: list[MoveRecord] = []
 
     try:
         resolved_root = result.plan_target_dir.resolve(strict=True)
     except OSError as exc:
-        return 0, len(result.successful_moves), [f"Target root directory inaccessible: {exc}"]
+        return 0, len(result.successful_moves), [f"Target root directory inaccessible: {exc}"], []
 
     # Process in reverse order of original execution
     for record in reversed(list(result.successful_moves)):
@@ -440,7 +434,7 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
         target_restore = original_loc
         if target_restore.exists() or target_restore.is_symlink():
             target_restore = build_collision_safe_path(orig_parent, original_loc.name)
-            errors.append(
+            notes.append(
                 f"Original location for '{original_loc.name}' was occupied; restored as '{target_restore.name}'."
             )
 
@@ -461,7 +455,7 @@ def undo_last_operation(result: ExecutionResult) -> tuple[int, int, list[str]]:
 
     # Retain only failed moves in result so subsequent retries only process un-restored items
     result.successful_moves = list(reversed(retained_moves))
-    return undone_count, failed_count, errors
+    return undone_count, failed_count, errors, notes
 
 
 def move_to_system_trash(
@@ -469,7 +463,8 @@ def move_to_system_trash(
     trash_dir: Path | None = None,
 ) -> tuple[bool, str | None]:
     """
-    Move a file to the FreeDesktop system trash (~/.local/share/Trash).
+    Move a file to the FreeDesktop system trash ($XDG_DATA_HOME/Trash, by
+    default ~/.local/share/Trash).
 
     Creates compliant .trashinfo metadata. Cleans up orphaned metadata
     if moving the file fails.
@@ -487,18 +482,19 @@ def move_to_system_trash(
     if trash_dir is None and IS_WINDOWS:
         return trash_windows(file_path)
 
-    base_trash = trash_dir if trash_dir is not None else Path.home() / ".local/share/Trash"
-    trash_files_dir = base_trash / "files"
-    trash_info_dir = base_trash / "info"
+    if trash_dir is None:
+        # FreeDesktop spec: $XDG_DATA_HOME if set to an absolute path, else ~/.local/share
+        xdg_data_home = os.environ.get("XDG_DATA_HOME", "")
+        data_home = Path(xdg_data_home) if os.path.isabs(xdg_data_home) else Path.home() / ".local/share"
+        trash_dir = data_home / "Trash"
+    trash_files_dir = trash_dir / "files"
+    trash_info_dir = trash_dir / "info"
 
     try:
         trash_files_dir.mkdir(parents=True, exist_ok=True)
         trash_info_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return False, f"Could not access trash directory: {exc}"
-
-    dest_path = build_collision_safe_path(trash_files_dir, file_path.name)
-    info_path = trash_info_dir / f"{dest_path.name}.trashinfo"
 
     deletion_date = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     escaped_path = urllib.parse.quote(str(file_path.resolve()))
@@ -507,12 +503,21 @@ def move_to_system_trash(
     )
 
     info_created = False
+    rejected_names: set[Path] = set()
     try:
-        with open(info_path, "w", encoding="utf-8") as fh:
-            fh.write(info_content)
-        info_created = True
+        while True:
+            dest_path = build_collision_safe_path(trash_files_dir, file_path.name, rejected_names)
+            info_path = trash_info_dir / f"{dest_path.name}.trashinfo"
+            try:
+                # Exclusive create: never overwrite another program's trash entry
+                with open(info_path, "x", encoding="utf-8") as fh:
+                    info_created = True
+                    fh.write(info_content)
+                break
+            except FileExistsError:
+                rejected_names.add(dest_path)
 
-        shutil.move(str(file_path), str(dest_path))
+        move_file(file_path, dest_path)
         return True, None
     except OSError as exc:
         if info_created:
@@ -521,6 +526,55 @@ def move_to_system_trash(
             except OSError:
                 pass
         return False, f"Failed to trash '{file_path.name}': {exc}"
+
+
+def _changed_since_scan(f: DuplicateFile) -> str | None:
+    """Return why ``f`` no longer matches what the scan saw, or None if unchanged."""
+    try:
+        st = f.path.stat()
+    except OSError as exc:
+        return f"no longer accessible ({exc.strerror or exc})"
+    if st.st_size != f.size:
+        return "size changed since scan"
+    if f.mtime_ns is None or st.st_mtime_ns != f.mtime_ns:
+        return "modified since scan"
+    if f.inode is not None and st.st_ino != f.inode:
+        return "replaced since scan"
+    return None
+
+
+def filter_unchanged_duplicates(
+    groups: list[DuplicateGroup],
+) -> tuple[list[Path], list[str]]:
+    """
+    Re-stat selected files and their kept copies right before acting on them.
+
+    A selected file that changed since the scan is skipped. A whole group is
+    skipped when none of its unselected (kept) copies still exists unchanged,
+    so the action can never remove the last good copy.
+
+    Returns (paths safe to act on, one skip message per skipped file).
+    """
+    safe: list[Path] = []
+    skips: list[str] = []
+    for group in groups:
+        selected = [f for f in group.files if f.selected]
+        if not selected:
+            continue
+        kept = [f for f in group.files if not f.selected]
+        if not any(_changed_since_scan(f) is None for f in kept):
+            skips.extend(
+                f"{f.path.name}: no unchanged kept copy remains in its group"
+                for f in selected
+            )
+            continue
+        for f in selected:
+            reason = _changed_since_scan(f)
+            if reason:
+                skips.append(f"{f.path.name}: {reason}")
+            else:
+                safe.append(f.path)
+    return safe, skips
 
 
 def build_duplicate_move_plan(
@@ -534,8 +588,9 @@ def build_duplicate_move_plan(
     Enforces safety invariants:
       - Validates destination subfolder name and ensures it does not escape target_dir.
       - Enforces source root containment within target_dir.
-      - Strictly ignores symbolic links and non-regular files.
-      - Rejects sources that are already located inside the duplicate destination folder.
+      - Skips symbolic links and non-regular files.
+      - Skips sources that are already located inside the duplicate destination folder.
+      - Every skipped source is recorded as a SKIPPED item with a skip_reason.
       - Tracks allocated destinations to avoid intra-batch collisions.
 
     Returns:
@@ -561,39 +616,39 @@ def build_duplicate_move_plan(
     planned_destinations: set[Path] = set()
 
     for f in duplicates:
+        skip_reason: str | None = None
+        size = 0
         if not f.exists() or f.is_symlink() or not f.is_file():
+            skip_reason = "Missing, symbolic link or not a regular file"
+        elif is_cloud_placeholder(f):
+            skip_reason = "Cloud-only file skipped (would trigger download)"
+        else:
+            try:
+                f_resolved = f.resolve(strict=True)
+                # Enforce source containment inside target_dir
+                if not f_resolved.is_relative_to(target_dir_resolved):
+                    skip_reason = "Outside the target folder"
+                # Reject sources already inside the duplicate destination folder
+                elif f_resolved.is_relative_to(dup_folder_resolved):
+                    skip_reason = f"Already inside '{subfolder_name}'"
+                else:
+                    size = f.stat().st_size
+            except OSError as exc:
+                skip_reason = f"Inaccessible file: {exc}"
+
+        if skip_reason:
+            plan.items.append(
+                OperationItem(
+                    source=f,
+                    destination=None,
+                    status=OperationStatus.SKIPPED,
+                    skip_reason=skip_reason,
+                )
+            )
             continue
 
-        if is_cloud_placeholder(f):
-            continue
-
-        try:
-            f_resolved = f.resolve(strict=True)
-            # Enforce source containment inside target_dir
-            if not f_resolved.is_relative_to(target_dir_resolved):
-                continue
-            # Reject sources already inside the duplicate destination folder
-            if f_resolved.is_relative_to(dup_folder_resolved):
-                continue
-            size = f.stat().st_size
-        except OSError:
-            continue
-
-        candidate_dest = dup_folder / f.name
-        is_collision = candidate_dest.exists() or candidate_dest in planned_destinations
-
-        final_dest = (
-            build_collision_safe_path(dup_folder, f.name)
-            if is_collision
-            else candidate_dest
-        )
-        while (
-            final_dest in planned_destinations
-            or final_dest.exists()
-            or final_dest.is_symlink()
-        ):
-            final_dest = build_collision_safe_path(dup_folder, final_dest.name)
-
+        final_dest = build_collision_safe_path(dup_folder, f.name, planned_destinations)
+        is_collision = final_dest != dup_folder / f.name
         planned_destinations.add(final_dest)
 
         plan.items.append(

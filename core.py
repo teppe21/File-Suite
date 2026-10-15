@@ -235,17 +235,25 @@ def split_stem_and_suffix(filename: str) -> tuple[str, str]:
     return name, ""
 
 
-def build_collision_safe_path(dest_dir: Path, filename: str) -> Path:
+def build_collision_safe_path(
+    dest_dir: Path, filename: str, reserved: set[Path] | None = None
+) -> Path:
     """
     Return a path inside ``dest_dir`` for ``filename`` that does not yet
-    exist. Preserves multi-extension suffixes:
+    exist and is not in ``reserved`` (paths already planned in this batch).
+    Preserves multi-extension suffixes:
 
         backup.tar.gz   -> backup_1.tar.gz
         photo.jpg       -> photo_1.jpg
         file            -> file_1
     """
+    reserved = reserved or set()
+
+    def taken(candidate: Path) -> bool:
+        return candidate.exists() or candidate.is_symlink() or candidate in reserved
+
     candidate = dest_dir / filename
-    if not (candidate.exists() or candidate.is_symlink()):
+    if not taken(candidate):
         return candidate
 
     stem, suffix = split_stem_and_suffix(filename)
@@ -253,7 +261,7 @@ def build_collision_safe_path(dest_dir: Path, filename: str) -> Path:
     while True:
         new_name = f"{stem}_{counter}{suffix}"
         candidate = dest_dir / new_name
-        if not (candidate.exists() or candidate.is_symlink()):
+        if not taken(candidate):
             return candidate
         counter += 1
 

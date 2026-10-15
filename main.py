@@ -1,8 +1,9 @@
 """
-File Suite — Modern Linux Desktop Organizer & Deduplication Utility.
+File Suite — Desktop File Organizer & Deduplication Utility.
 
 A polished, secure, and deterministic utility for organizing files and finding
-duplicates inside a selected Linux directory.
+duplicates inside a selected directory. Linux is the primary platform;
+Windows support is experimental.
 """
 
 from __future__ import annotations
@@ -28,8 +29,10 @@ from models import (
     DuplicateGroup,
     ExecutionResult,
     OperationPlan,
+    OperationStatus,
     ScanProgress,
     clear_duplicate_selection,
+    groups_without_kept_copy,
     select_all_duplicates,
     update_duplicate_groups_after_removal,
 )
@@ -37,6 +40,7 @@ from operations import (
     build_duplicate_move_plan,
     build_organization_plan,
     execute_operation_plan,
+    filter_unchanged_duplicates,
     move_to_system_trash,
     undo_last_operation,
 )
@@ -651,9 +655,12 @@ class FileOrganizerApp(ctk.CTk):
         self._is_executing = True
         try:
             self.set_status("PROCESSING", "Undoing file moves...", THEME["accent"])
-            undone, failed, errors = undo_last_operation(res)
+            undone, failed, errors, notes = undo_last_operation(res)
 
             self._update_undo_button_state()
+
+            for note in notes:
+                self.log("WARN", note)
 
             if undone > 0:
                 self.log("SUCCESS", f"Undo completed: restored {undone} file(s) to original location.")
@@ -768,7 +775,8 @@ class FileOrganizerApp(ctk.CTk):
             return
 
         self._is_scanning = True
-        self._cancel_scan.clear()
+        # A fresh event per scan, so a stale worker can never be revived
+        self._cancel_scan = threading.Event()
         self._scan_generation += 1
         current_gen = self._scan_generation
         target_dir = self.current_path
@@ -783,7 +791,7 @@ class FileOrganizerApp(ctk.CTk):
 
         worker = threading.Thread(
             target=self._duplicate_scan_worker,
-            args=(target_dir, current_gen),
+            args=(target_dir, current_gen, self._cancel_scan),
             daemon=True,
         )
         worker.start()
@@ -795,14 +803,14 @@ class FileOrganizerApp(ctk.CTk):
             self.set_status("CANCELLED", "Cancelling scan...", THEME["warning"])
             self.log("WARN", "User requested duplicate scan cancellation.")
 
-    def _duplicate_scan_worker(self, target_dir: Path, gen: int):
+    def _duplicate_scan_worker(self, target_dir: Path, gen: int, cancel_event: threading.Event):
         def on_prog(progress: ScanProgress):
             self._safe_after(self._on_duplicate_scan_progress, progress, gen)
 
         try:
             groups = scan_duplicates(
                 target_dir=target_dir,
-                cancel_event=self._cancel_scan,
+                cancel_event=cancel_event,
                 on_progress=on_prog,
             )
             self._safe_after(self._on_duplicate_scan_complete, groups, target_dir, gen)
@@ -1018,11 +1026,6 @@ class FileOrganizerApp(ctk.CTk):
         select_all_duplicates(self.duplicate_groups)
         self._render_duplicate_groups()
 
-    def _select_originals_only(self):
-        """Keep original preserved (unselected), select all redundant copies."""
-        select_all_duplicates(self.duplicate_groups)
-        self._render_duplicate_groups()
-
     def _clear_selection(self):
         clear_duplicate_selection(self.duplicate_groups)
         self._render_duplicate_groups()
@@ -1034,6 +1037,31 @@ class FileOrganizerApp(ctk.CTk):
                 if f.selected:
                     selected.append(f.path)
         return selected
+
+    def _refuse_if_no_kept_copy(self) -> bool:
+        """Show an error and return True when some group would lose every copy."""
+        unkept = groups_without_kept_copy(self.duplicate_groups)
+        if not unkept:
+            return False
+        # Number groups the way the results list does ("Group N").
+        names = "\n".join(
+            f"• Group {idx}: {g.files[0].path.name}"
+            for idx, g in enumerate(self.duplicate_groups, 1)
+            if g in unkept
+        )
+        messagebox.showerror(
+            "Every Copy Selected",
+            f"Every copy is selected in these group(s):\n{names}\n\n"
+            "Leave at least one copy unselected in each group to keep it.",
+        )
+        return True
+
+    def _unchanged_selection(self) -> list[Path]:
+        """Re-check selected files against the scan and log every skipped file."""
+        safe, skips = filter_unchanged_duplicates(self.duplicate_groups)
+        for reason in skips:
+            self.log("WARN", f"Skipped {reason}")
+        return safe
 
     def _move_selected_duplicates(self):
         if self._is_executing:
@@ -1054,6 +1082,8 @@ class FileOrganizerApp(ctk.CTk):
         if not selected:
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to isolate.")
             return
+        if self._refuse_if_no_kept_copy():
+            return
 
         if not messagebox.askyesno(
             "Confirm Isolation",
@@ -1063,10 +1093,16 @@ class FileOrganizerApp(ctk.CTk):
 
         self._is_executing = True
         try:
+            selected = self._unchanged_selection()
             ok, plan, err = build_duplicate_move_plan(selected, self.current_path, "Duplicates")
             if not ok:
                 messagebox.showerror("Error", err or "Failed to build move plan")
                 return
+            if plan.skipped_count:
+                self.log("WARN", f"Skipped {plan.skipped_count} selected file(s):")
+                for item in plan.items:
+                    if item.status == OperationStatus.SKIPPED:
+                        self.log("WARN", f"  {item.source.name} — {item.skip_reason}")
 
             result = execute_operation_plan(plan)
             self.last_execution_result = result
@@ -1126,6 +1162,8 @@ class FileOrganizerApp(ctk.CTk):
         if not selected:
             messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to trash.")
             return
+        if self._refuse_if_no_kept_copy():
+            return
 
         # The scan is non-recursive, so every selected file is on this folder's drive.
         may_be_permanent = trash_may_be_permanent(self.duplicate_scan_dir)
@@ -1140,7 +1178,7 @@ class FileOrganizerApp(ctk.CTk):
             successful_paths: set[Path] = set()
             failed_count = 0
 
-            for f in selected:
+            for f in self._unchanged_selection():
                 ok, err = move_to_system_trash(f)
                 if ok:
                     successful_paths.add(f)
@@ -1303,6 +1341,12 @@ class FileOrganizerApp(ctk.CTk):
         self._scan_generation += 1
         if self._is_scanning:
             self._cancel_scan.set()
+            # The stale worker's callbacks are ignored, so reset the scan UI here
+            self._is_scanning = False
+            if hasattr(self, "scan_dup_btn") and self.scan_dup_btn.winfo_exists():
+                self.scan_dup_btn.configure(state="normal")
+                self.cancel_scan_btn.configure(state="disabled")
+                self.dup_progress_bar.grid_remove()
         self.current_plan = None
         self.duplicate_groups.clear()
         self.duplicate_scan_dir = None

@@ -51,6 +51,25 @@ class DuplicateScanTests(unittest.TestCase):
 
         self.assertEqual(group.reclaimable_bytes, 2 * len(content))
 
+    def test_progress_counts_groups_once(self):
+        for name in ("a1", "a2", "a3"):
+            (self.target / name).write_bytes(b"aaaa")
+        for name in ("b1", "b2"):
+            (self.target / name).write_bytes(b"bbbb")
+        (self.target / "c1").write_bytes(b"cccc")
+
+        seen: list[int] = []
+        scan_duplicates(self.target, on_progress=lambda p: seen.append(p.groups_found))
+        self.assertEqual(seen[-1], 2)
+        self.assertEqual(seen, sorted(seen))
+
+    def test_scan_records_mtime(self):
+        (self.target / "a").write_bytes(b"same")
+        (self.target / "b").write_bytes(b"same")
+        [group] = scan_duplicates(self.target)
+        for f in group.files:
+            self.assertEqual(f.mtime_ns, f.path.stat().st_mtime_ns)
+
     def test_same_size_different_content_not_duplicates(self):
         (self.target / "f1.txt").write_bytes(b"12345678")
         (self.target / "f2.txt").write_bytes(b"87654321")

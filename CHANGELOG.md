@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.2.0] - 2026-10-14
+
 ### Added
 - **Windows Support (Experimental)**: File Suite runs on Windows 10 22H2+ and Windows 11 (x64) from source. Adds `platform_utils.py` for platform-specific behavior; Linux behavior is unchanged except for the inode `0` change below.
   - Windows hidden and system files, cloud-only OneDrive files, and junctions and mount points are skipped or rejected; Windows-invalid folder names are rejected; files are moved without overwriting.
@@ -15,12 +19,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `CONIN$` and `CONOUT$` are rejected as reserved folder names.
   - Windows window icon (`organizer.ico`) and monospace log font.
 - **Windows Packaging**: `packaging/windows/build.ps1` builds a PyInstaller one-dir bundle and writes `FileSuite-windows-x64-v<version>.zip` with a SHA-256 checksum file.
-- **Windows CI**: `windows.yml` runs the test suite on Python 3.10-3.13 and builds the bundle, which is uploaded as a workflow artifact. The zip is not yet attached to GitHub Releases.
+- **Windows CI**: `windows.yml` runs the test suite on Python 3.10-3.13 and builds the bundle, which is uploaded as a workflow artifact.
+- **Windows Release Asset**: `release.yml` builds the Windows zip and attaches it and its `.sha256` file to the GitHub Release next to the Linux binary.
 - Windows-specific and cross-platform unit tests (`test_platform_utils.py`, `test_windows.py`).
+
+### Fixed
+- **Duplicates: last copy protected**: Moving or trashing duplicates is refused while every copy of a group is selected; the dialog names the affected groups. Any copy can still be chosen as the one to keep.
+- **Duplicates: stale scan results**: Scans record each file's modification time. Before moving or trashing, selected files whose size, modification time or inode changed are skipped, and a group with no unchanged kept copy is skipped entirely. Each skip is logged.
+- **No-clobber moves on Linux**: Moves no longer use `shutil.move`, which silently replaced a destination created after the checks. Files are hard-linked then unlinked, with an exclusive-create copy fallback where hard links are unavailable (other drive, FAT/exFAT). The Linux trash uses the same move.
+- **Duplicate scan stuck after a folder change**: Changing folders during a scan now resets the scan buttons and progress bar, and each scan gets its own cancel event so a new scan cannot revive the old one.
+- **Undo renames hidden**: Files restored under a new name because the original location was taken are always logged as warnings, not only when another file failed.
+- **Colliding preview destinations**: The organization preview tracks destinations already planned in the batch (e.g. `a.jpg` and `a_1.jpg` no longer both map to `Images/a_1.jpg`).
+- **Possible hang when planning moves**: Planning duplicate moves (and executing a batch) could loop forever when a suffixed name was already planned in the batch.
+- **Silent skips in duplicate moves**: Selected files that cannot be moved are recorded as skipped with a reason and logged.
+- **FreeDesktop trash**: Honors `$XDG_DATA_HOME`, and `.trashinfo` files are created exclusively so another application's trash entry is never overwritten.
 
 ### Changed
 - Hard-link accounting treats inode `0` as unknown, so files on filesystems that report no inode numbers are no longer counted as hard links of each other.
 - New application icon.
+- `undo_last_operation` returns a fourth value: notes about files restored under a new name.
+- Duplicate-group progress is counted incrementally instead of rescanning all hashes for every file.
+- CI: `tests.yml` and `windows.yml` run with a read-only token.
+- README: Linux primary / Windows experimental wording, `platform_utils.py` in the architecture, updated safety model, no hard-coded test counts, new "Development process" section.
+
+### Removed
+- Unused `_select_originals_only` method in `main.py`.
 
 ---
 

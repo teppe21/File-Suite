@@ -122,6 +122,7 @@ class DuplicateFile:
     selected: bool = False  # Checked for action (e.g. move to Duplicates or Trash)
     inode: int | None = None
     device: int | None = None
+    mtime_ns: int | None = None
 
 
 @dataclass
@@ -199,6 +200,11 @@ def select_all_duplicates(groups: list[DuplicateGroup]) -> None:
     for group in groups:
         for f in group.files:
             f.selected = not f.is_original
+
+
+def groups_without_kept_copy(groups: list[DuplicateGroup]) -> list[DuplicateGroup]:
+    """Return the groups whose every copy is selected, so acting on them would keep nothing."""
+    return [g for g in groups if g.files and all(f.selected for f in g.files)]
 
 
 def clear_duplicate_selection(groups: list[DuplicateGroup]) -> None:
