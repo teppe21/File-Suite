@@ -34,11 +34,11 @@ CHECKED, UNCHECKED = "☑", "☐"
 _COLUMNS = (
     # id, heading, width, stretch, anchor. Widths fit the 880 px minimum window;
     # ttk only stretches columns when there is extra room, never shrinks them.
-    ("name", "Name", 160, True, "w"),
-    ("size", "Size", 72, False, "e"),
-    ("modified", "Modified", 124, False, "w"),
-    ("role", "Role", 92, True, "w"),
-    ("hash", "SHA-256", 64, False, "w"),
+    ("name", "Name", 144, True, "w"),  # the only stretching column: gets all spare width
+    ("size", "Size", 66, False, "e"),
+    ("modified", "Modified", 118, False, "w"),
+    ("role", "Role", 112, False, "w"),
+    ("hash", "SHA-256", 72, False, "w"),
 )
 
 
