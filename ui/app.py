@@ -134,6 +134,18 @@ class FileOrganizerApp(ctk.CTk):
         ctk.AppearanceModeTracker.remove(self._on_appearance_change)
         self.destroy()
 
+    @contextlib.contextmanager
+    def _busy(self):
+        """Busy cursor, and paint the "busy" status before a blocking file operation."""
+        # shortcut: moves, trash and undo still run on the UI thread, so the window freezes on
+        # huge batches; move them to a worker like the scan if users hit that.
+        self.configure(cursor="watch")
+        self.update_idletasks()
+        try:
+            yield
+        finally:
+            self.configure(cursor="")
+
     def _safe_after(self, func, *args):
         """Thread-safe dispatch to the main Tkinter thread."""
         if not self._is_closing:
@@ -381,7 +393,8 @@ class FileOrganizerApp(ctk.CTk):
             self.set_status("busy", f"Moving {plan.affected_count} files…")
             self.log("INFO", f"Applying organization plan ({plan.affected_count} files)...")
 
-            result = execute_operation_plan(plan)
+            with self._busy():
+                result = execute_operation_plan(plan)
             result.description = "Organize"  # label for the Undo button
             self.last_execution_result = result
             self.update_undo_state()
@@ -430,7 +443,8 @@ class FileOrganizerApp(ctk.CTk):
         self._is_executing = True
         try:
             self.set_status("busy", "Undoing the last move…")
-            undone, failed, errors, notes = undo_last_operation(res)
+            with self._busy():
+                undone, failed, errors, notes = undo_last_operation(res)
 
             self.update_undo_state()
             self.organize.banner.hide()  # its "Moved N files" no longer holds
@@ -670,7 +684,9 @@ class FileOrganizerApp(ctk.CTk):
                     if item.status == OperationStatus.SKIPPED:
                         self.log("WARN", f"  {item.source.name} — {item.skip_reason}")
 
-            result = execute_operation_plan(plan)
+            self.set_status("busy", f"Moving {plan.affected_count} duplicates…")
+            with self._busy():
+                result = execute_operation_plan(plan)
             result.description = "Duplicates moved"  # label for the Undo button
             self.last_execution_result = result
             self.update_undo_state()
@@ -744,14 +760,16 @@ class FileOrganizerApp(ctk.CTk):
             failed_count = 0
             unchanged = self._unchanged_selection()
 
-            for f in unchanged:
-                ok, err = move_to_system_trash(f)
-                if ok:
-                    successful_paths.add(f)
-                    self.log("INFO", f"Trashed duplicate: {f.name}")
-                else:
-                    failed_count += 1
-                    self.log("ERROR", f"Could not trash {f.name}: {err}")
+            self.set_status("busy", f"Sending {len(unchanged)} duplicates to the {trash_label()}…")
+            with self._busy():
+                for f in unchanged:
+                    ok, err = move_to_system_trash(f)
+                    if ok:
+                        successful_paths.add(f)
+                        self.log("INFO", f"Trashed duplicate: {f.name}")
+                    else:
+                        failed_count += 1
+                        self.log("ERROR", f"Could not trash {f.name}: {err}")
 
             success_count = len(successful_paths)
 
