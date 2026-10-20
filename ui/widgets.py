@@ -178,9 +178,16 @@ class EmptyState(ctk.CTkFrame):
             inner, text="", font=t.font("body"), text_color=t.TEXT_MUTED, wraplength=420, justify="center"
         )
         self.text_label.pack(pady=(4, 0))
+        self.button = primary_button(inner, button_text or "", command)
         if button_text:
-            primary_button(inner, button_text, command).pack(pady=(2 * t.SPACE, 0))
+            self.button.pack(pady=(2 * t.SPACE, 0))
 
-    def set(self, title: str, text: str = ""):
+    def set(self, title: str, text: str = "", button_text: str | None = None):
+        """Change the message; ``button_text`` relabels the button, an empty string hides it."""
         self.title_label.configure(text=title)
         self.text_label.configure(text=text)
+        if button_text:
+            self.button.configure(text=button_text)
+            self.button.pack(pady=(2 * t.SPACE, 0))
+        elif button_text == "":
+            self.button.pack_forget()

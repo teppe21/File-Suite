@@ -37,7 +37,7 @@ from operations import (
 from platform_utils import IS_WINDOWS, trash_label, trash_may_be_permanent
 from ui import theme as t
 from ui.activity_view import ActivityView
-from ui.duplicates_view import DuplicatesView
+from ui.duplicates_view import DuplicatesView, group_label
 from ui.formatting import format_log_line, format_size, truncate_middle, undo_label
 from ui.organize_view import OrganizeView
 from ui.widgets import secondary_button, set_enabled
@@ -219,7 +219,7 @@ class FileOrganizerApp(ctk.CTk):
             nav, text="Ctrl+1 / 2 / 3 to switch", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
         ).grid(row=3, column=0, padx=12, pady=(2, 0), sticky="w")
 
-        self.undo_button = secondary_button(bar, "Undo", self.execute_undo, height=48, font=t.font("caption"))
+        self.undo_button = secondary_button(bar, "Undo", self.execute_undo, height=64, font=t.font("caption"))
         self.undo_button.grid(row=5, column=0, padx=pad - 4, pady=(0, t.SPACE), sticky="ew")
 
         foot = ctk.CTkFrame(bar, fg_color="transparent")
@@ -319,8 +319,8 @@ class FileOrganizerApp(ctk.CTk):
         res = self.last_execution_result
         available = bool(res and res.success_count > 0)
         label = undo_label(res)
-        # Two lines so the description fits the sidebar width
-        text = "↶ " + label.replace(": ", "  Ctrl+Z\n", 1) if available else "↶ Undo"
+        # "Undo: Organize · 17 files · 20:14" on three lines to fit the sidebar
+        text = label.replace("Undo: ", "↶ Undo  Ctrl+Z\n", 1).replace(" · ", "\n", 1) if available else "↶ Undo"
         self.undo_button.configure(text=text)
         set_enabled(self.undo_button, available)
 
@@ -356,6 +356,7 @@ class FileOrganizerApp(ctk.CTk):
                 "success" if result.failure_count == 0 else "warning",
                 f"Organized {result.success_count} files, {result.failure_count} failed.",
             )
+            self._files_changed()
             return result
         finally:
             self._is_executing = False
@@ -380,6 +381,7 @@ class FileOrganizerApp(ctk.CTk):
 
             self.update_undo_state()
             self.organize.banner.hide()  # its "Moved N files" no longer holds
+            self._files_changed()
 
             for note in notes:
                 self.log("WARN", note)
@@ -403,6 +405,13 @@ class FileOrganizerApp(ctk.CTk):
             )
         finally:
             self._is_executing = False
+
+    def _files_changed(self, stale_duplicates: bool = True):
+        """Files were moved: flag duplicate results and any open preview as out of date."""
+        if stale_duplicates:
+            self.duplicates.mark_stale()
+        if self.organize.plan is not None:
+            self.organize.clear_preview("Files changed", "Preview again to see what will move.")
 
     # ------------------------------------------------------------------
     # Duplicate scan (background thread)
@@ -438,7 +447,7 @@ class FileOrganizerApp(ctk.CTk):
     def cancel_duplicate_scan(self):
         if self._is_scanning:
             self._cancel_scan.set()
-            self.duplicates.set_progress_text("Cancelling scan...")
+            self.duplicates.set_progress_text("Cancelling…")
             self.set_status("warning", "Cancelling the scan…")
             self.log("WARN", "User requested duplicate scan cancellation.")
 
@@ -466,7 +475,11 @@ class FileOrganizerApp(ctk.CTk):
         self.duplicates.set_scanning(False)
 
         self.set_status("error", "Duplicate scan failed. See Activity for details.")
-        self.duplicates.set_progress_text(f"Scan error: {err_msg}")
+        self.duplicates.set_progress_text("Scan failed.")
+        self.duplicates.render_groups()
+        self.duplicates.banner.show(
+            "error", "The scan failed", err_msg, ("Open Activity", lambda: self.show_view("activity"))
+        )
         self.log("ERROR", f"Duplicate scan failed: {err_msg}")
 
     def _on_duplicate_scan_progress(self, progress: ScanProgress, gen: int):
@@ -490,7 +503,8 @@ class FileOrganizerApp(ctk.CTk):
 
         if self._cancel_scan.is_set():
             self.set_status("warning", "Duplicate scan cancelled.")
-            self.duplicates.set_progress_text("Scan cancelled by user.")
+            self.duplicates.set_progress_text("Scan cancelled.")
+            self.duplicates.render_groups()
             return
 
         self.duplicate_groups = groups
@@ -499,22 +513,19 @@ class FileOrganizerApp(ctk.CTk):
 
         if not groups:
             self.set_status("success", "Scan finished: no duplicates found.")
-            self.duplicates.set_progress_text("Scan complete: No duplicates found.")
             self.log("INFO", "Duplicate scan completed: 0 duplicates detected.")
         else:
             self.set_status(
                 "success",
                 f"Scan finished: {len(groups)} groups, {total_dup_files} extra copies, {total_reclaimable} reclaimable.",
             )
-            self.duplicates.set_progress_text(
-                f"Found {len(groups)} group(s) — {total_dup_files} duplicate files ({total_reclaimable} reclaimable)"
-            )
             self.log(
                 "SUCCESS",
                 f"Found {len(groups)} duplicate group(s), {total_dup_files} redundant copies ({total_reclaimable} reclaimable).",
             )
 
-        self.duplicates.render_groups()
+        self.duplicates.set_progress_text(f"Scanned at {datetime.now():%H:%M}.  Ctrl+Enter to scan again")
+        self.duplicates.scan_finished()
 
     # ------------------------------------------------------------------
     # Duplicate actions (move / trash)
@@ -528,12 +539,8 @@ class FileOrganizerApp(ctk.CTk):
         unkept = groups_without_kept_copy(self.duplicate_groups)
         if not unkept:
             return False
-        # Number groups the way the results list does ("Group N").
-        names = "\n".join(
-            f"• Group {idx}: {g.files[0].path.name}"
-            for idx, g in enumerate(self.duplicate_groups, 1)
-            if g in unkept
-        )
+        # Name groups the way the results tree does.
+        names = "\n".join(f"• {group_label(g)}" for g in unkept)
         messagebox.showerror(
             "Every Copy Selected",
             f"Every copy is selected in these group(s):\n{names}\n\n"
@@ -583,6 +590,7 @@ class FileOrganizerApp(ctk.CTk):
 
         self._is_executing = True
         try:
+            selected_count = len(selected)
             selected = self._unchanged_selection()
             ok, plan, err = build_duplicate_move_plan(selected, self.current_path, "Duplicates")
             if not ok:
@@ -609,14 +617,8 @@ class FileOrganizerApp(ctk.CTk):
                 self.log("ERROR", f"{result.failure_count} duplicate file(s) could not be moved.")
                 for src, _, err_msg in result.failed_moves:
                     self.log("ERROR", f"  Failed: {src.name} — {err_msg}")
-                messagebox.showwarning(
-                    "Partial Duplicate Isolation",
-                    f"What happened:\n{result.success_count} file(s) moved, but {result.failure_count} failed.\n\n"
-                    "Why:\nOne or more files were modified, locked, or removed externally.\n\n"
-                    "Next steps:\nCheck the Activity view for detailed diagnostics.",
-                )
 
-            status_msg = f"Isolated {result.success_count} duplicate(s)."
+            status_msg = f"Moved {result.success_count} duplicates to “Duplicates”."
             if result.failure_count > 0:
                 status_msg += f" ({result.failure_count} failed)"
             self.set_status("success" if result.failure_count == 0 else "warning", status_msg)
@@ -627,6 +629,9 @@ class FileOrganizerApp(ctk.CTk):
                 self.duplicate_groups, successful_paths
             )
             self.duplicates.render_groups()
+            skipped = (selected_count - len(selected)) + plan.skipped_count
+            self.duplicates.report_move(result, skipped)
+            self._files_changed(stale_duplicates=False)
         finally:
             self._is_executing = False
 
@@ -655,8 +660,9 @@ class FileOrganizerApp(ctk.CTk):
         try:
             successful_paths: set[Path] = set()
             failed_count = 0
+            unchanged = self._unchanged_selection()
 
-            for f in self._unchanged_selection():
+            for f in unchanged:
                 ok, err = move_to_system_trash(f)
                 if ok:
                     successful_paths.add(f)
@@ -671,24 +677,20 @@ class FileOrganizerApp(ctk.CTk):
                 self.log("WARN", f"Removed {success_count} file(s) ({failed_count} failed). Files on this drive may have been deleted permanently instead of being sent to the {trash_label()}.")
             else:
                 self.log("SUCCESS", f"Sent {success_count} file(s) to {trash_label()} ({failed_count} failed).")
-            status_msg = f"Trashed {success_count} file(s)."
+            status_msg = f"Removed {success_count} duplicates."
             if failed_count > 0:
                 status_msg += f" ({failed_count} failed)"
             self.set_status("success" if failed_count == 0 else "warning", status_msg)
-
-            if failed_count > 0:
-                messagebox.showwarning(
-                    "Trash Finished with Errors",
-                    f"What happened:\n{success_count} file(s) moved to trash, but {failed_count} encountered errors.\n\n"
-                    "Why:\nSome files may be locked, symbolic links, or removed externally.\n\n"
-                    "Next steps:\nReview the Activity view for details.",
-                )
 
             # Update duplicate model preserving unaffected groups
             self.duplicate_groups = update_duplicate_groups_after_removal(
                 self.duplicate_groups, successful_paths
             )
             self.duplicates.render_groups()
+            self.duplicates.report_trash(
+                success_count, failed_count, len(selected) - len(unchanged), may_be_permanent
+            )
+            self._files_changed(stale_duplicates=False)
         finally:
             self._is_executing = False
 
@@ -745,8 +747,7 @@ class FileOrganizerApp(ctk.CTk):
         self.duplicate_scan_dir = None
 
         self.organize.clear_preview("Folder changed", "Preview to see what will move in this folder.")
-        self.duplicates.render_groups()
-        self.duplicates.set_progress_text("Ready to scan root folder for byte-identical duplicates.")
+        self.duplicates.reset()
 
     def select_folder(self):
         initial_dir = self.current_path if self.current_path.exists() else Path.home()

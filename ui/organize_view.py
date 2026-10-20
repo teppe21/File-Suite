@@ -22,11 +22,12 @@ from ui.widgets import (
 )
 
 _COLUMNS = (
-    # id, heading, width, stretch, anchor
-    ("file", "File", 260, True, "w"),
-    ("dest", "Moves to", 170, True, "w"),
-    ("size", "Size", 90, False, "e"),
-    ("note", "Note", 200, True, "w"),
+    # id, heading, width, stretch, anchor. Widths fit the 880 px minimum window;
+    # ttk only stretches columns when there is extra room, never shrinks them.
+    ("file", "File", 190, True, "w"),
+    ("dest", "Moves to", 120, True, "w"),
+    ("size", "Size", 76, False, "e"),
+    ("note", "Note", 140, True, "w"),
 )
 
 
@@ -156,9 +157,10 @@ class OrganizeView(ctk.CTkFrame):
         self.tree = ttk.Treeview(
             self.table, columns=[c[0] for c in _COLUMNS], show="headings", selectmode="browse"
         )
+        scale = ctk.ScalingTracker.get_widget_scaling(self)
         for col, heading, width, stretch, anchor in _COLUMNS:
             self.tree.heading(col, text=heading, anchor=anchor, command=lambda c=col: self._sort_by(c))
-            self.tree.column(col, width=width, minwidth=60, stretch=stretch, anchor=anchor)
+            self.tree.column(col, width=round(width * scale), minwidth=round(48 * scale), stretch=stretch, anchor=anchor)
         self.tree.grid(row=1, column=0, sticky="nsew")
         scroll = ctk.CTkScrollbar(self.table, command=self.tree.yview)
         scroll.grid(row=1, column=1, sticky="ns")
