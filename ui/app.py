@@ -325,7 +325,7 @@ class FileOrganizerApp(ctk.CTk):
         set_enabled(self.undo_button, available)
 
     def apply_plan(self, plan: OperationPlan) -> ExecutionResult | None:
-        """Execute a previewed organization plan. Returns None if nothing ran."""
+        """Execute a previewed organization plan; the view reports the result. None if nothing ran."""
         if self._is_executing:
             return None
         if not plan or plan.affected_count == 0:
@@ -351,12 +351,6 @@ class FileOrganizerApp(ctk.CTk):
                 self.log("ERROR", f"{result.failure_count} file(s) could not be moved.")
                 for src, _, err in result.failed_moves:
                     self.log("ERROR", f"  Failed: {src.name} — {err}")
-                messagebox.showwarning(
-                    "Partial Execution",
-                    f"What happened:\n{result.success_count} file(s) were organized, but {result.failure_count} encountered errors.\n\n"
-                    "Why:\nOne or more files were modified, locked, or moved prior to execution.\n\n"
-                    "Next steps:\nCheck the Activity view for detailed per-file diagnostics.",
-                )
 
             self.set_status(
                 "success" if result.failure_count == 0 else "warning",
@@ -385,6 +379,7 @@ class FileOrganizerApp(ctk.CTk):
             undone, failed, errors, notes = undo_last_operation(res)
 
             self.update_undo_state()
+            self.organize.banner.hide()  # its "Moved N files" no longer holds
 
             for note in notes:
                 self.log("WARN", note)
@@ -749,7 +744,7 @@ class FileOrganizerApp(ctk.CTk):
         self.duplicate_groups.clear()
         self.duplicate_scan_dir = None
 
-        self.organize.clear_preview()
+        self.organize.clear_preview("Folder changed", "Preview to see what will move in this folder.")
         self.duplicates.render_groups()
         self.duplicates.set_progress_text("Ready to scan root folder for byte-identical duplicates.")
 
