@@ -24,12 +24,12 @@ from ui.widgets import (
     EmptyState,
     danger_button,
     primary_button,
+    scrollbar,
     secondary_button,
+    set_default,
     set_enabled,
-    view_header,
+    tooltip,
 )
-
-CHECKED, UNCHECKED = "☑", "☐"
 
 _COLUMNS = (
     # id, heading, width, stretch, anchor. Widths fit the 880 px minimum window;
@@ -48,6 +48,9 @@ def group_label(group: DuplicateGroup) -> str:
 
 
 class DuplicatesView(ctk.CTkFrame):
+    TITLE = "Duplicates"
+    SUBTITLE = "Byte-identical files directly in this folder. Subfolders are not scanned."
+
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app = app
@@ -58,12 +61,6 @@ class DuplicatesView(ctk.CTkFrame):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
-
-        view_header(
-            self,
-            "Find duplicates",
-            "Finds byte-identical files directly in this folder (subfolders are not scanned).",
-        ).grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         self.banner = Banner(self)
         self.banner.grid(row=1, column=0, sticky="ew", pady=(0, 2 * t.SPACE))
@@ -81,17 +78,18 @@ class DuplicatesView(ctk.CTkFrame):
     def _build_scan_bar(self) -> ctk.CTkFrame:
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid_columnconfigure(2, weight=1)
-        self.scan_button = primary_button(bar, "Scan this folder", self.app.start_duplicate_scan)
+        self.scan_button = primary_button(bar, "Scan Folder", self.app.start_duplicate_scan, width=112)
         self.scan_button.grid(row=0, column=0, rowspan=2)
-        self.cancel_button = secondary_button(bar, "Cancel", self.app.cancel_duplicate_scan)
+        tooltip(self.scan_button, "Compare every file directly in this folder. Nothing changes.  (Ctrl+Enter)")
+        self.cancel_button = secondary_button(bar, "Cancel", self.app.cancel_duplicate_scan, width=80)
         self.cancel_button.grid(row=0, column=1, rowspan=2, padx=(t.SPACE, 0))
         self.cancel_button.grid_remove()
         self.progress_label = ctk.CTkLabel(
-            bar, text="Ctrl+Enter", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
+            bar, text="", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
         )
         self.progress_label.grid(row=0, column=2, rowspan=2, padx=2 * t.SPACE, sticky="ew")
         self.progress_bar = ctk.CTkProgressBar(
-            bar, height=6, corner_radius=3, progress_color=t.ACCENT, fg_color=t.SURFACE_2
+            bar, height=4, corner_radius=2, progress_color=t.ACCENT, fg_color=t.NEUTRAL
         )
         self.progress_bar.set(0)
         self.progress_bar.grid(row=1, column=2, padx=2 * t.SPACE, sticky="ew")
@@ -103,22 +101,25 @@ class DuplicatesView(ctk.CTkFrame):
         body = card.body
         body.grid_rowconfigure(3, weight=1)
 
-        self.summary_label = ctk.CTkLabel(body, text="", font=t.font("body_bold"), text_color=t.TEXT, anchor="w")
+        self.summary_label = ctk.CTkLabel(body, text="", font=t.font("headline"), text_color=t.TEXT, anchor="w")
         self.summary_label.grid(row=0, column=0, sticky="w")
-        self.selected_label = ctk.CTkLabel(body, text="", font=t.font("body"), text_color=t.TEXT, anchor="e")
+        self.selected_label = ctk.CTkLabel(body, text="", font=t.font("body"), text_color=t.TEXT_MUTED, anchor="e")
         self.selected_label.grid(row=0, column=1, sticky="e")
         self.unkept_label = ctk.CTkLabel(body, text="", font=t.font("caption"), text_color=t.DANGER, anchor="e")
         self.unkept_label.grid(row=1, column=0, columnspan=2, sticky="e")
 
         self.toolbar = ctk.CTkFrame(body, fg_color="transparent")
         self.toolbar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(t.SPACE, t.SPACE))
-        for text, command in (
-            ("Select all extra copies", self._select_all),
-            ("Clear selection", self._clear_selection),
-            ("Expand all", lambda: self._set_open(True)),
-            ("Collapse all", lambda: self._set_open(False)),
+        for text, command, tip in (
+            ("Select Extra Copies", self._select_all, "Tick every copy except the original of each group"),
+            ("Clear Selection", self._clear_selection, "Untick everything"),
+            ("Expand All", lambda: self._set_open(True), None),
+            ("Collapse All", lambda: self._set_open(False), None),
         ):
-            secondary_button(self.toolbar, text, command, small=True, width=0).pack(side="left", padx=(0, t.SPACE))
+            button = secondary_button(self.toolbar, text, command, small=True)
+            button.pack(side="left", padx=(0, 6))
+            if tip:
+                tooltip(button, tip)
 
         self._tree_frame = ctk.CTkFrame(body, fg_color="transparent")
         self._tree_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
@@ -132,42 +133,48 @@ class DuplicatesView(ctk.CTkFrame):
             self.tree.heading(col, text=heading, anchor=anchor)
             self.tree.column(col, width=round(width * scale), minwidth=round(48 * scale), stretch=stretch, anchor=anchor)
         self.tree.grid(row=0, column=0, sticky="nsew")
-        scroll = ctk.CTkScrollbar(self._tree_frame, command=self.tree.yview)
-        scroll.grid(row=0, column=1, sticky="ns")
-        self.tree.configure(yscrollcommand=scroll.set)
+        scrollbar(self._tree_frame, self.tree).grid(row=0, column=1, sticky="ns")
         t.register_tree_tags(
             self.tree,
             {
-                "group": {"font": t.tree_font("body_bold"), "background": t.SURFACE},
-                "unkept": {"foreground": t.DANGER, "background": t.DANGER_SOFT},
+                "group": {"font": t.tree_font("headline"), "background": t.GROUP_ROW},
+                "unkept": {"foreground": t.DANGER, "background": t.DANGER_TINT},
             },
         )
         self.tree.bind("<Button-1>", self._on_click)
         self.tree.bind("<space>", self._on_space)
         self.tree.bind("<Delete>", lambda _e: self.app.trash_selected_duplicates())
 
-        self.empty = EmptyState(body, "Scan this folder", self.app.start_duplicate_scan)
+        self.empty = EmptyState(body, "Scan Folder", self.app.start_duplicate_scan)
         self.empty.grid(row=0, column=0, rowspan=4, columnspan=2, sticky="nsew")
         return card
 
     def _build_footer(self) -> ctk.CTkFrame:
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        self.move_button = primary_button(footer, "Move to “Duplicates” folder", self.app.move_selected_duplicates)
-        self.move_button.grid(row=0, column=2)
-        ctk.CTkLabel(footer, text="can be undone · Ctrl+M", font=t.font("caption"), text_color=t.TEXT_MUTED).grid(
-            row=1, column=2
-        )
-        self.trash_button = danger_button(
-            footer, f"Send to {trash_label()}", self.app.trash_selected_duplicates
-        )
-        self.trash_button.grid(row=0, column=1, padx=(0, t.SPACE))
-        ctk.CTkLabel(
-            footer, text="can't be undone here · Del", font=t.font("caption"), text_color=t.TEXT_MUTED
-        ).grid(row=1, column=1, padx=(0, t.SPACE))
-        ctk.CTkLabel(
-            footer, text="Click ☐ or press Space to tick", font=t.font("caption"), text_color=t.TEXT_MUTED
-        ).grid(row=0, column=0, sticky="w")
         footer.grid_columnconfigure(0, weight=1)
+        hint = ctk.CTkLabel(
+            footer, text="Click a tick box or press Space to tick a copy.", font=t.font("caption"), text_color=t.TEXT_MUTED
+        )
+        hint.grid(row=0, column=0, sticky="w")
+
+        def fit_hint(event):
+            # The hint only shows when it fits beside the buttons (not in narrow windows).
+            room = event.width - self.trash_button.winfo_reqwidth() - self.move_button.winfo_reqwidth()
+            if room > hint.winfo_reqwidth() + 2 * t.MARGIN:
+                hint.grid()
+            else:
+                hint.grid_remove()
+
+        footer.bind("<Configure>", fit_hint, add="+")
+        self.trash_button = danger_button(footer, "", self.app.trash_selected_duplicates)
+        self.trash_button.grid(row=0, column=1, padx=(0, t.SPACE))
+        tooltip(
+            self.trash_button,
+            f"Send the ticked copies to the {trash_label()}. This can't be undone from File Suite.  (Delete)",
+        )
+        self.move_button = primary_button(footer, "", self.app.move_selected_duplicates)
+        self.move_button.grid(row=0, column=2)
+        tooltip(self.move_button, "Move the ticked copies into a “Duplicates” folder here. You can undo this.  (Ctrl+M)")
         return footer
 
     # ------------------------------------------------------------------
@@ -214,7 +221,7 @@ class DuplicatesView(ctk.CTkFrame):
         """Folder changed: back to the "no scan yet" state."""
         self._scanned = False
         self.banner.hide()
-        self.set_progress_text("Ctrl+Enter")
+        self.set_progress_text("")
         self.render_groups()
 
     def mark_stale(self):
@@ -244,13 +251,13 @@ class DuplicatesView(ctk.CTkFrame):
                 self.empty.set(
                     "No duplicates found",
                     "No two files directly in this folder have identical content.",
-                    button_text="Scan again",
+                    button_text="Scan Again",
                 )
             else:
                 self.empty.set(
                     "No scan yet",
                     "Scan this folder to find files with identical content. Scanning changes nothing.",
-                    button_text="Scan this folder",
+                    button_text="Scan Folder",
                 )
             self.empty.grid()
             self._update_summary()
@@ -280,7 +287,8 @@ class DuplicatesView(ctk.CTkFrame):
         )
         self.tree.item(
             fid,
-            text=f"  {CHECKED if f.selected else UNCHECKED}",
+            text="",
+            image=t.checkbox_image(self, f.selected),
             values=(f.path.name, format_size(f.size), modified, role, ""),
         )
 
@@ -326,12 +334,11 @@ class DuplicatesView(ctk.CTkFrame):
         count = s.selected_files
         set_enabled(self.move_button, count > 0)
         set_enabled(self.trash_button, count > 0)
-        self.move_button.configure(
-            text=f"Move {plural(count, 'file')} to “Duplicates”" if count else "Move to “Duplicates” folder"
-        )
-        self.trash_button.configure(
-            text=f"Send {plural(count, 'file')} to {trash_label()}" if count else f"Send to {trash_label()}"
-        )
+        files = f"{plural(count, 'File', 'Files')} " if count else ""
+        self.move_button.configure(text=f"Move {files}to “Duplicates”")
+        self.trash_button.configure(text=f"Move {files}to {trash_label().title()}")
+        # One default action: Scan until there are results, then Move.
+        set_default(self.scan_button, s.groups == 0)
 
     # ------------------------------------------------------------------
     # Ticking
@@ -397,7 +404,7 @@ class DuplicatesView(ctk.CTkFrame):
             self.banner.show(
                 "success",
                 f"Moved {plural(moved, 'file')} to “Duplicates”",
-                "Undo is in the sidebar (Ctrl+Z).",
+                "Use Undo in the toolbar to put them back.",
                 ("Undo", self.app.execute_undo),
             )
             return
