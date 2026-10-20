@@ -16,11 +16,11 @@ class VersionTests(unittest.TestCase):
         semver_pattern = r"^\d+\.\d+\.\d+$"
         self.assertRegex(version.__version__, semver_pattern)
 
-    def test_version_imported_in_main(self):
-        """main.py imports and uses the centralized __version__."""
+    def test_version_imported_in_ui(self):
+        """The UI (ui/app.py) imports and uses the centralized __version__."""
         repo_root = Path(__file__).resolve().parent.parent
-        main_py = repo_root / "main.py"
-        content = main_py.read_text(encoding="utf-8")
+        app_py = repo_root / "ui" / "app.py"
+        content = app_py.read_text(encoding="utf-8")
         self.assertIn("from version import __version__", content)
         self.assertIn("f\"File Suite v{__version__}", content)
 

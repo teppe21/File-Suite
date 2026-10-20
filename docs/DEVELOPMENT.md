@@ -13,7 +13,7 @@ The presentation layer, domain logic and filesystem access are kept in separate 
 ```mermaid
 graph TD
     subgraph Presentation ["Presentation Layer (CustomTkinter)"]
-        UI["main.py: FileOrganizerApp"]
+        UI["ui/app.py: FileOrganizerApp + views"]
         LOG["In-App Activity Log"]
         DLG["Native File Dialogs (zenity / kdialog)"]
     end
@@ -61,7 +61,10 @@ graph TD
 | `operations.py` | Dry-run plan building, containment checks, moves, FreeDesktop trash and session undo. |
 | `duplicates.py` | Size grouping, chunked SHA-256 hashing, deterministic sorting and cooperative cancellation. |
 | `platform_utils.py` | Linux/Windows differences: hidden files, link detection, no-clobber moves, Recycle Bin, folder name rules. |
-| `main.py` | CustomTkinter UI, view router, live progress and diagnostics. |
+| `main.py` | Entry point: creates the window and runs the main loop. |
+| `ui/app.py` | Main window, shared state, logging, undo, folder change and the safety checks around every move or trash. |
+| `ui/organize_view.py`, `ui/duplicates_view.py`, `ui/activity_view.py` | The three views, built once at start-up and shown or hidden. |
+| `ui/theme.py`, `ui/formatting.py` | Colours and fonts; pure text helpers (sizes, plurals, summaries), unit-tested without a display. |
 
 `packaging/windows/` holds the PyInstaller spec, `build.ps1` and `make_icon.py`, which regenerates `organizer.ico` from `organizer.jpg`.
 
