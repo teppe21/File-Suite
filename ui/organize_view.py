@@ -114,21 +114,6 @@ class OrganizeView(ctk.CTkFrame):
             command=self.generate_preview,
         ).pack(side="left", padx=(0, 10))
 
-        self.undo_btn = ctk.CTkButton(
-            action_bar,
-            text="Undo Last Move",
-            height=36,
-            corner_radius=6,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color=THEME["surface_card"],
-            hover_color=THEME["surface_hover"],
-            border_width=1,
-            border_color=THEME["border_light"],
-            text_color=THEME["text_primary"],
-            command=app.execute_undo,
-        )
-        self.undo_btn.pack(side="left")
-
         self.preview_container = ctk.CTkFrame(
             container,
             fg_color=THEME["surface"],
@@ -177,14 +162,14 @@ class OrganizeView(ctk.CTkFrame):
         if not ok:
             messagebox.showerror("Invalid Configuration", err or "Unknown configuration error")
             app.log("ERROR", f"Organization configuration rejected: {err}")
-            app.set_status("ERROR", str(err), THEME["danger"])
+            app.set_status("error", str(err))
             return
 
         self.plan = plan
 
         if plan.affected_count == 0:
             self._reset_preview_area("No matching files found in root directory to organize.")
-            app.set_status("READY", "Preview: No files match selected criteria.", THEME["accent"])
+            app.set_status("info", "Preview: no files match the selected rules.")
             return
 
         self._reset_preview_area()
@@ -249,11 +234,7 @@ class OrganizeView(ctk.CTkFrame):
             command=self.clear_preview,
         ).pack(side="left")
 
-        app.set_status(
-            "PREVIEW READY",
-            f"Review planned changes: {plan.affected_count} file(s) selected.",
-            THEME["accent"],
-        )
+        app.set_status("info", f"Preview ready: {plan.affected_count} files will move. Nothing has changed yet.")
         app.log(
             "INFO",
             f"Preview generated: {plan.affected_count} file(s) ({size_text}), {plan.collision_count} collision(s).",

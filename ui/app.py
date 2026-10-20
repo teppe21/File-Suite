@@ -35,11 +35,12 @@ from operations import (
     undo_last_operation,
 )
 from platform_utils import IS_WINDOWS, trash_label, trash_may_be_permanent
+from ui import theme as t
 from ui.activity_view import ActivityView
 from ui.duplicates_view import DuplicatesView
-from ui.formatting import format_log_line, format_size
+from ui.formatting import format_log_line, format_size, truncate_middle, undo_label
 from ui.organize_view import OrganizeView
-from ui.theme import THEME
+from ui.widgets import secondary_button, set_enabled
 from version import __version__
 
 
@@ -56,12 +57,13 @@ class FileOrganizerApp(ctk.CTk):
     """Primary application controller and UI orchestration."""
 
     def __init__(self):
+        ctk.set_appearance_mode("System")
         super().__init__()
 
-        self.title(f"File Suite v{__version__} — Filesystem Organizer & Duplicate Cleaner")
-        self.geometry("920x760")
-        self.minsize(840, 640)
-        self.configure(fg_color=THEME["bg_main"])
+        self.title(f"File Suite v{__version__}")
+        self.geometry("1040x720")
+        self.minsize(880, 600)
+        self.configure(fg_color=t.BG)
 
         self._set_window_icon()
 
@@ -81,11 +83,15 @@ class FileOrganizerApp(ctk.CTk):
 
         # Activity log store: (time, level, message)
         self.log_entries: list[tuple[str, str, str]] = []
+        self._unseen_problems = 0  # WARN/ERROR lines since Activity was last opened
+        self.current_view = ""
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
+        t.apply_treeview_style(self)
+        ctk.AppearanceModeTracker.add(self._on_appearance_change, self)
         self._build_layout()
-        self.show_view("Organize Files")
+        self.show_view("organize")
         self.log("INFO", f"File Suite initialized. Active directory: {self.current_path}")
 
     # ------------------------------------------------------------------
@@ -118,6 +124,7 @@ class FileOrganizerApp(ctk.CTk):
         """Handle window close gracefully, terminating worker threads cooperatively."""
         self._is_closing = True
         self._cancel_scan.set()
+        ctk.AppearanceModeTracker.remove(self._on_appearance_change)
         self.destroy()
 
     def _safe_after(self, func, *args):
@@ -127,163 +134,162 @@ class FileOrganizerApp(ctk.CTk):
                 self.after(0, func, *args)
 
     # ------------------------------------------------------------------
-    # UI Layout Construction
+    # Layout: sidebar | view, status bar below
     # ------------------------------------------------------------------
 
     def _build_layout(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)  # Workspace area absorbs vertical space
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self._build_header()
-        self._build_target_bar()
+        self._build_sidebar()
 
-        self.workspace_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.workspace_frame.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="nsew")
-        self.workspace_frame.grid_columnconfigure(0, weight=1)
-        self.workspace_frame.grid_rowconfigure(0, weight=1)
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.grid(row=0, column=1, padx=3 * t.SPACE, pady=(3 * t.SPACE, 2 * t.SPACE), sticky="nsew")
+        content.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(0, weight=1)
 
         self._build_status_bar()
 
         # Views are built once and toggled, so their state survives switching.
-        self.organize = OrganizeView(self.workspace_frame, self)
-        self.duplicates = DuplicatesView(self.workspace_frame, self)
-        self.activity = ActivityView(self.workspace_frame, self)
-        self.views = {
-            "Organize Files": self.organize,
-            "Duplicate Finder": self.duplicates,
-            "Activity Log": self.activity,
-        }
+        self.organize = OrganizeView(content, self)
+        self.duplicates = DuplicatesView(content, self)
+        self.activity = ActivityView(content, self)
+        self.views = {"organize": self.organize, "duplicates": self.duplicates, "activity": self.activity}
         self.update_undo_state()
 
-    def _build_header(self):
-        header = ctk.CTkFrame(self, fg_color=THEME["surface"], corner_radius=0, height=56)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_columnconfigure(1, weight=1)
+    def _build_sidebar(self):
+        bar = ctk.CTkFrame(self, fg_color=t.SURFACE, corner_radius=0, width=t.SIDEBAR_WIDTH)
+        bar.grid(row=0, column=0, sticky="ns")
+        bar.grid_propagate(False)
+        bar.grid_columnconfigure(0, weight=1)
+        bar.grid_rowconfigure(4, weight=1)
+        pad = 2 * t.SPACE
 
-        brand_frame = ctk.CTkFrame(header, fg_color="transparent")
-        brand_frame.grid(row=0, column=0, padx=20, pady=10, sticky="w")
+        brand = ctk.CTkFrame(bar, fg_color="transparent")
+        brand.grid(row=0, column=0, padx=pad, pady=(pad + 4, pad), sticky="w")
+        icon_path = _resource_path("organizer-small.png")
+        if icon_path.exists():
+            with contextlib.suppress(Exception):
+                self.brand_icon = ctk.CTkImage(Image.open(icon_path), size=(28, 28))
+                ctk.CTkLabel(brand, image=self.brand_icon, text="").pack(side="left", padx=(0, t.SPACE))
+        ctk.CTkLabel(brand, text="File Suite", font=t.font("section"), text_color=t.TEXT).pack(side="left")
 
+        # Folder card: replaces the old disabled path entry
         ctk.CTkLabel(
-            brand_frame,
-            text="FILE SUITE",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-
-        ctk.CTkLabel(
-            brand_frame,
-            text=f"v{__version__}",
-            font=ctk.CTkFont(size=11),
-            text_color=THEME["text_muted"],
-        ).pack(side="left", padx=(8, 0), pady=(3, 0))
-
-        self.view_selector = ctk.CTkSegmentedButton(
-            header,
-            values=["Organize Files", "Duplicate Finder", "Activity Log"],
-            command=self.show_view,
-            height=32,
-            corner_radius=6,
-            fg_color=THEME["surface_card"],
-            selected_color=THEME["accent"],
-            selected_hover_color=THEME["accent_hover"],
-            unselected_color=THEME["surface_card"],
-            unselected_hover_color=THEME["surface_hover"],
-            font=ctk.CTkFont(size=12, weight="bold"),
+            bar, text="FOLDER", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
+        ).grid(row=1, column=0, padx=pad, sticky="w")
+        folder = ctk.CTkFrame(bar, fg_color=t.SURFACE_2, corner_radius=t.CARD_RADIUS)
+        folder.grid(row=2, column=0, padx=pad - 4, pady=(4, pad), sticky="ew")
+        folder.grid_columnconfigure(0, weight=1)
+        self.folder_name_label = ctk.CTkLabel(
+            folder, text="", font=t.font("body_bold"), text_color=t.TEXT, anchor="w"
         )
-        self.view_selector.set("Organize Files")
-        self.view_selector.grid(row=0, column=2, padx=20, pady=10, sticky="e")
-
-    def _build_target_bar(self):
-        target_card = ctk.CTkFrame(
-            self,
-            fg_color=THEME["surface"],
-            corner_radius=8,
-            border_width=1,
-            border_color=THEME["border"],
+        self.folder_name_label.grid(row=0, column=0, padx=12, pady=(10, 0), sticky="ew")
+        self.folder_path_label = ctk.CTkLabel(
+            folder, text="", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
         )
-        target_card.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
-        target_card.grid_columnconfigure(1, weight=1)
+        self.folder_path_label.grid(row=1, column=0, padx=12, sticky="ew")
+        secondary_button(folder, "Change folder…  Ctrl+O", self.select_folder, small=True).grid(
+            row=2, column=0, padx=12, pady=(6, 12), sticky="ew"
+        )
+        self._show_folder()
 
+        nav = ctk.CTkFrame(bar, fg_color="transparent")
+        nav.grid(row=3, column=0, padx=pad - 4, sticky="ew")
+        nav.grid_columnconfigure(0, weight=1)
+        self.nav_buttons: dict[str, ctk.CTkButton] = {}
+        for idx, (key, label) in enumerate(
+            (("organize", "Organize"), ("duplicates", "Duplicates"), ("activity", "Activity"))
+        ):
+            button = ctk.CTkButton(
+                nav,
+                text=label,
+                anchor="w",
+                height=t.BUTTON_HEIGHT,
+                corner_radius=t.BUTTON_RADIUS,
+                font=t.font("body"),
+                fg_color="transparent",
+                hover_color=t.SURFACE_2,
+                text_color=t.TEXT,
+                command=lambda k=key: self.show_view(k),
+            )
+            button.grid(row=idx, column=0, pady=2, sticky="ew")
+            self.nav_buttons[key] = button
         ctk.CTkLabel(
-            target_card,
-            text="Target Folder:",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=THEME["text_secondary"],
-        ).grid(row=0, column=0, padx=(14, 10), pady=10, sticky="w")
+            nav, text="Ctrl+1 / 2 / 3 to switch", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
+        ).grid(row=3, column=0, padx=12, pady=(2, 0), sticky="w")
 
-        self.path_var = ctk.StringVar(value=str(self.current_path))
-        ctk.CTkEntry(
-            target_card,
-            textvariable=self.path_var,
-            state="disabled",
-            height=32,
-            corner_radius=6,
-            border_width=1,
-            border_color=THEME["border"],
-            fg_color=THEME["surface_card"],
-            text_color=THEME["text_primary"],
-            font=ctk.CTkFont(size=12),
-        ).grid(row=0, column=1, padx=4, pady=10, sticky="ew")
+        self.undo_button = secondary_button(bar, "Undo", self.execute_undo, height=48, font=t.font("caption"))
+        self.undo_button.grid(row=5, column=0, padx=pad - 4, pady=(0, t.SPACE), sticky="ew")
 
-        ctk.CTkButton(
-            target_card,
-            text="Browse...",
-            height=32,
-            corner_radius=6,
-            width=90,
-            fg_color=THEME["surface_card"],
-            hover_color=THEME["surface_hover"],
-            border_width=1,
-            border_color=THEME["border_light"],
-            text_color=THEME["text_primary"],
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self.select_folder,
-        ).grid(row=0, column=2, padx=(8, 14), pady=10)
+        foot = ctk.CTkFrame(bar, fg_color="transparent")
+        foot.grid(row=6, column=0, padx=pad, pady=(0, pad), sticky="ew")
+        ctk.CTkLabel(foot, text=f"v{__version__}", font=t.font("caption"), text_color=t.TEXT_MUTED).pack(side="left")
+        self.theme_button = secondary_button(foot, "", self._toggle_theme, small=True, width=84)
+        self.theme_button.pack(side="right")
+        self._update_theme_button()
+
+    def _show_folder(self):
+        path = self.current_path
+        self.folder_name_label.configure(text=truncate_middle(path.name or str(path), 22))
+        self.folder_path_label.configure(text=truncate_middle(str(path), 26))
 
     def _build_status_bar(self):
-        status_bar = ctk.CTkFrame(self, fg_color=THEME["surface"], corner_radius=0, height=32)
-        status_bar.grid(row=3, column=0, sticky="ew")
-        status_bar.grid_columnconfigure(1, weight=1)
-
-        self.status_badge = ctk.CTkLabel(
-            status_bar,
-            text="READY",
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#ffffff",
-            fg_color=THEME["accent"],
-            corner_radius=4,
-            width=64,
-            height=18,
-        )
-        self.status_badge.grid(row=0, column=0, padx=(16, 10), pady=6)
-
+        bar = ctk.CTkFrame(self, fg_color=t.SURFACE, corner_radius=0, height=32)
+        bar.grid(row=1, column=0, columnspan=2, sticky="ew")
+        bar.grid_columnconfigure(1, weight=1)
+        self.status_dot = ctk.CTkLabel(bar, text="●", font=t.font("caption"), text_color=t.TEXT_MUTED)
+        self.status_dot.grid(row=0, column=0, padx=(2 * t.SPACE, t.SPACE), pady=4)
         self.status_label = ctk.CTkLabel(
-            status_bar,
-            text="Ready. Choose an operation to proceed.",
-            font=ctk.CTkFont(size=11),
-            text_color=THEME["text_secondary"],
+            bar, text="Ready.", font=t.font("caption"), text_color=t.TEXT, anchor="w"
         )
-        self.status_label.grid(row=0, column=1, sticky="w", pady=6)
+        self.status_label.grid(row=0, column=1, sticky="ew", pady=4)
 
-        self.undo_indicator = ctk.CTkLabel(
-            status_bar,
-            text="Undo: Inactive",
-            font=ctk.CTkFont(size=11),
-            text_color=THEME["text_muted"],
-        )
-        self.undo_indicator.grid(row=0, column=2, padx=16, pady=6)
+    _STATUS_COLORS = {
+        "info": t.TEXT_MUTED,
+        "busy": t.ACCENT_TEXT,
+        "success": t.SUCCESS,
+        "warning": t.WARNING,
+        "error": t.DANGER,
+    }
 
-    def set_status(self, badge: str, message: str, color: str = THEME["accent"]):
-        """Update the status bar indicators."""
-        self.status_badge.configure(text=badge, fg_color=color)
+    def set_status(self, kind: str, message: str):
+        """Status bar: coloured dot (info/busy/success/warning/error) and one sentence."""
+        self.status_dot.configure(text_color=self._STATUS_COLORS[kind])
         self.status_label.configure(text=message)
 
-    def show_view(self, view_name: str):
-        for name, view in self.views.items():
-            if name == view_name:
+    def show_view(self, name: str):
+        self.current_view = name
+        for key, view in self.views.items():
+            active = key == name
+            if active:
                 view.grid(row=0, column=0, sticky="nsew")
             else:
                 view.grid_remove()
+            self.nav_buttons[key].configure(
+                fg_color=t.ACCENT_SOFT if active else "transparent",
+                font=t.font("body_bold" if active else "body"),
+            )
+        if name == "activity":
+            self._unseen_problems = 0
+            self._update_activity_badge()
+
+    def _update_activity_badge(self):
+        n = self._unseen_problems
+        self.nav_buttons["activity"].configure(text=f"Activity  ({n})" if n else "Activity")
+
+    def _toggle_theme(self):
+        ctk.set_appearance_mode("Dark" if ctk.get_appearance_mode() == "Light" else "Light")
+
+    def _update_theme_button(self):
+        light = ctk.get_appearance_mode() == "Light"
+        self.theme_button.configure(text="☾ Dark" if light else "☀ Light")
+
+    def _on_appearance_change(self, _mode: str):
+        if self._is_closing:
+            return
+        t.apply_treeview_style(self)
+        self._update_theme_button()
 
     # ------------------------------------------------------------------
     # Activity log
@@ -294,6 +300,9 @@ class FileOrganizerApp(ctk.CTk):
         entry = (datetime.now().strftime("%H:%M:%S"), level.upper(), message)
         self.log_entries.append(entry)
         self.activity.append(entry)
+        if entry[1] in ("WARN", "ERROR") and self.current_view != "activity":
+            self._unseen_problems += 1
+            self._update_activity_badge()
         # Also print to terminal stdout for CLI diagnostics
         print(format_log_line(entry).strip())
 
@@ -306,19 +315,14 @@ class FileOrganizerApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def update_undo_state(self):
-        if self.last_execution_result and self.last_execution_result.success_count > 0:
-            count = self.last_execution_result.success_count
-            self.organize.undo_btn.configure(
-                state="normal",
-                text=f"Undo Last Move ({count} file{'s' if count != 1 else ''})",
-            )
-            self.undo_indicator.configure(
-                text=f"Undo: Available ({count})",
-                text_color=THEME["success"],
-            )
-        else:
-            self.organize.undo_btn.configure(state="disabled", text="Undo Last Move")
-            self.undo_indicator.configure(text="Undo: None", text_color=THEME["text_muted"])
+        """Global Undo button: says what will be undone, disabled when nothing can be."""
+        res = self.last_execution_result
+        available = bool(res and res.success_count > 0)
+        label = undo_label(res)
+        # Two lines so the description fits the sidebar width
+        text = "↶ " + label.replace(": ", "  Ctrl+Z\n", 1) if available else "↶ Undo"
+        self.undo_button.configure(text=text)
+        set_enabled(self.undo_button, available)
 
     def apply_plan(self, plan: OperationPlan) -> ExecutionResult | None:
         """Execute a previewed organization plan. Returns None if nothing ran."""
@@ -329,10 +333,11 @@ class FileOrganizerApp(ctk.CTk):
 
         self._is_executing = True
         try:
-            self.set_status("PROCESSING", "Executing file moves...", THEME["accent"])
+            self.set_status("busy", f"Moving {plan.affected_count} files…")
             self.log("INFO", f"Applying organization plan ({plan.affected_count} files)...")
 
             result = execute_operation_plan(plan)
+            result.description = "Organize"  # label for the Undo button
             self.last_execution_result = result
             self.update_undo_state()
 
@@ -350,13 +355,12 @@ class FileOrganizerApp(ctk.CTk):
                     "Partial Execution",
                     f"What happened:\n{result.success_count} file(s) were organized, but {result.failure_count} encountered errors.\n\n"
                     "Why:\nOne or more files were modified, locked, or moved prior to execution.\n\n"
-                    "Next steps:\nCheck the Activity Log tab for detailed per-file diagnostics.",
+                    "Next steps:\nCheck the Activity view for detailed per-file diagnostics.",
                 )
 
             self.set_status(
-                "COMPLETED",
-                f"Finished: {result.success_count} organized, {result.failure_count} failed.",
-                THEME["success"] if result.failure_count == 0 else THEME["warning"],
+                "success" if result.failure_count == 0 else "warning",
+                f"Organized {result.success_count} files, {result.failure_count} failed.",
             )
             return result
         finally:
@@ -377,7 +381,7 @@ class FileOrganizerApp(ctk.CTk):
 
         self._is_executing = True
         try:
-            self.set_status("PROCESSING", "Undoing file moves...", THEME["accent"])
+            self.set_status("busy", "Undoing the last move…")
             undone, failed, errors, notes = undo_last_operation(res)
 
             self.update_undo_state()
@@ -395,13 +399,12 @@ class FileOrganizerApp(ctk.CTk):
                     "Undo Finished with Errors",
                     f"What happened:\n{undone} file(s) were restored, but {failed} could not be restored.\n\n"
                     "Why:\nOriginal locations may be occupied by newly created files, or destination files were modified.\n\n"
-                    "Next steps:\nReview the Activity Log tab for details on un-restored items.",
+                    "Next steps:\nReview the Activity view for details on un-restored items.",
                 )
 
             self.set_status(
-                "COMPLETED",
-                f"Undo complete: {undone} restored, {failed} failed.",
-                THEME["success"] if failed == 0 else THEME["danger"],
+                "success" if failed == 0 else "error",
+                f"Undo finished: {undone} restored, {failed} failed.",
             )
         finally:
             self._is_executing = False
@@ -427,7 +430,7 @@ class FileOrganizerApp(ctk.CTk):
 
         self.duplicates.set_scanning(True)
 
-        self.set_status("SCANNING", f"Scanning {self.current_path.name}...", THEME["accent"])
+        self.set_status("busy", f"Scanning {self.current_path.name} for duplicates…")
         self.log("INFO", f"Initiated duplicate scan in: {self.current_path}")
 
         worker = threading.Thread(
@@ -441,7 +444,7 @@ class FileOrganizerApp(ctk.CTk):
         if self._is_scanning:
             self._cancel_scan.set()
             self.duplicates.set_progress_text("Cancelling scan...")
-            self.set_status("CANCELLED", "Cancelling scan...", THEME["warning"])
+            self.set_status("warning", "Cancelling the scan…")
             self.log("WARN", "User requested duplicate scan cancellation.")
 
     def _duplicate_scan_worker(self, target_dir: Path, gen: int, cancel_event: threading.Event):
@@ -467,7 +470,7 @@ class FileOrganizerApp(ctk.CTk):
         self._is_scanning = False
         self.duplicates.set_scanning(False)
 
-        self.set_status("ERROR", "Duplicate scan failed.", THEME["danger"])
+        self.set_status("error", "Duplicate scan failed. See Activity for details.")
         self.duplicates.set_progress_text(f"Scan error: {err_msg}")
         self.log("ERROR", f"Duplicate scan failed: {err_msg}")
 
@@ -491,7 +494,7 @@ class FileOrganizerApp(ctk.CTk):
         self.duplicates.set_scanning(False)
 
         if self._cancel_scan.is_set():
-            self.set_status("CANCELLED", "Duplicate scan was cancelled.", THEME["warning"])
+            self.set_status("warning", "Duplicate scan cancelled.")
             self.duplicates.set_progress_text("Scan cancelled by user.")
             return
 
@@ -500,14 +503,13 @@ class FileOrganizerApp(ctk.CTk):
         total_dup_files = sum(len(g.duplicates) for g in groups)
 
         if not groups:
-            self.set_status("COMPLETED", "Scan complete: No duplicate files found.", THEME["success"])
+            self.set_status("success", "Scan finished: no duplicates found.")
             self.duplicates.set_progress_text("Scan complete: No duplicates found.")
             self.log("INFO", "Duplicate scan completed: 0 duplicates detected.")
         else:
             self.set_status(
-                "COMPLETED",
-                f"Found {len(groups)} group(s) ({total_dup_files} redundant files, {total_reclaimable}).",
-                THEME["success"],
+                "success",
+                f"Scan finished: {len(groups)} groups, {total_dup_files} extra copies, {total_reclaimable} reclaimable.",
             )
             self.duplicates.set_progress_text(
                 f"Found {len(groups)} group(s) — {total_dup_files} duplicate files ({total_reclaimable} reclaimable)"
@@ -598,6 +600,7 @@ class FileOrganizerApp(ctk.CTk):
                         self.log("WARN", f"  {item.source.name} — {item.skip_reason}")
 
             result = execute_operation_plan(plan)
+            result.description = "Duplicates moved"  # label for the Undo button
             self.last_execution_result = result
             self.update_undo_state()
 
@@ -615,17 +618,13 @@ class FileOrganizerApp(ctk.CTk):
                     "Partial Duplicate Isolation",
                     f"What happened:\n{result.success_count} file(s) moved, but {result.failure_count} failed.\n\n"
                     "Why:\nOne or more files were modified, locked, or removed externally.\n\n"
-                    "Next steps:\nCheck the Activity Log tab for detailed diagnostics.",
+                    "Next steps:\nCheck the Activity view for detailed diagnostics.",
                 )
 
             status_msg = f"Isolated {result.success_count} duplicate(s)."
             if result.failure_count > 0:
                 status_msg += f" ({result.failure_count} failed)"
-            self.set_status(
-                "COMPLETED",
-                status_msg,
-                THEME["success"] if result.failure_count == 0 else THEME["warning"],
-            )
+            self.set_status("success" if result.failure_count == 0 else "warning", status_msg)
 
             # Update duplicate model preserving unaffected groups
             successful_paths = {r.source for r in result.successful_moves}
@@ -680,18 +679,14 @@ class FileOrganizerApp(ctk.CTk):
             status_msg = f"Trashed {success_count} file(s)."
             if failed_count > 0:
                 status_msg += f" ({failed_count} failed)"
-            self.set_status(
-                "COMPLETED",
-                status_msg,
-                THEME["success"] if failed_count == 0 else THEME["warning"],
-            )
+            self.set_status("success" if failed_count == 0 else "warning", status_msg)
 
             if failed_count > 0:
                 messagebox.showwarning(
                     "Trash Finished with Errors",
                     f"What happened:\n{success_count} file(s) moved to trash, but {failed_count} encountered errors.\n\n"
                     "Why:\nSome files may be locked, symbolic links, or removed externally.\n\n"
-                    "Next steps:\nReview the Activity Log tab for details.",
+                    "Next steps:\nReview the Activity view for details.",
                 )
 
             # Update duplicate model preserving unaffected groups
@@ -772,8 +767,8 @@ class FileOrganizerApp(ctk.CTk):
             pass
 
         self._invalidate_target_dependent_state(new_dir)
-        self.path_var.set(str(self.current_path))
+        self._show_folder()
 
-        self.set_status("READY", f"Target folder set to {self.current_path.name}", THEME["accent"])
+        self.set_status("info", f"Folder changed to {self.current_path.name}. Nothing has changed yet.")
         self.log("INFO", f"Active folder changed to: {self.current_path}")
 

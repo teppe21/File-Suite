@@ -8,6 +8,7 @@ root = Path(SPECPATH).resolve().parents[1]  # noqa: F821 (SPECPATH is set by PyI
 datas = [
     (str(root / "organizer.jpg"), "."),
     (str(root / "organizer.ico"), "."),
+    (str(root / "organizer-small.png"), "."),
 ] + collect_data_files("customtkinter")
 hiddenimports = collect_submodules("customtkinter")
 

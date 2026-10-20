@@ -41,6 +41,7 @@ pyinstaller \
     --name FileSuite \
     --onefile \
     --add-data "organizer.jpg:." \
+    --add-data "organizer-small.png:." \
     --collect-data customtkinter \
     --collect-submodules customtkinter \
     main.py
