@@ -10,44 +10,37 @@ import customtkinter as ctk
 from platform_utils import mono_font
 from ui import theme as t
 from ui.formatting import format_log_line
-from ui.widgets import secondary_button, view_header
+from ui.widgets import secondary_button, segmented, tooltip
 
 _LEVEL_COLORS = {"INFO": t.TEXT, "SUCCESS": t.SUCCESS, "WARN": t.WARNING, "ERROR": t.DANGER}
 _FILTERS = {"All": None, "Warnings": {"WARN"}, "Errors": {"ERROR"}}
 
 
 class ActivityView(ctk.CTkFrame):
+    TITLE = "Activity"
+    SUBTITLE = "Everything File Suite did in this session, including skipped files and errors."
+
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app = app
         self._levels: set[str] | None = None  # None = show every level
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
-
-        view_header(
-            self, "Activity", "Everything File Suite did in this session, including skipped files and errors."
-        ).grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self.grid_rowconfigure(1, weight=1)
 
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=1, column=0, sticky="ew", pady=(0, t.SPACE))
-        self.filter = ctk.CTkSegmentedButton(
-            bar,
-            values=list(_FILTERS),
-            command=self._on_filter,
-            height=t.SMALL_BUTTON_HEIGHT,
-            font=t.font("caption"),
-            fg_color=t.SURFACE_2,
-            selected_color=t.ACCENT_SOFT,  # one text colour for all segments, so no dark fill
-            selected_hover_color=t.ACCENT_SOFT,
-            unselected_color=t.SURFACE_2,
-            unselected_hover_color=t.BORDER,
-            text_color=t.TEXT,
-        )
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self.filter = segmented(bar, list(_FILTERS), self._on_filter)
         self.filter.set("All")
         self.filter.pack(side="left")
-        for text, command in (("Clear", app.clear_log), ("Save as…", self._save), ("Copy all", self._copy)):
-            secondary_button(bar, text, command, small=True, width=0).pack(side="right", padx=(t.SPACE, 0))
+        for text, command, tip in (
+            ("Clear", app.clear_log, "Empty the log for this session"),
+            ("Save As…", self._save, "Save the whole log as a text file"),
+            ("Copy All", self._copy, "Copy the whole log to the clipboard"),
+        ):
+            button = secondary_button(bar, text, command, small=True)
+            button.pack(side="right", padx=(6, 0))
+            tooltip(button, tip)
 
         self.log_box = ctk.CTkTextbox(
             self,
@@ -55,12 +48,14 @@ class ActivityView(ctk.CTkFrame):
             corner_radius=t.CARD_RADIUS,
             fg_color=t.SURFACE,
             border_width=1,
-            border_color=t.BORDER,
+            border_color=t.SEPARATOR,
             text_color=t.TEXT,
+            scrollbar_button_color=t.FIELD_BORDER,
+            scrollbar_button_hover_color=t.TEXT_MUTED,
             wrap="none",
             state="disabled",
         )
-        self.log_box.grid(row=2, column=0, sticky="nsew")
+        self.log_box.grid(row=1, column=0, sticky="nsew")
         self.apply_colors()
 
     def apply_colors(self):

@@ -46,7 +46,14 @@ from ui.formatting import (
     undo_label,
 )
 from ui.organize_view import OrganizeView
-from ui.widgets import confirm_dialog, secondary_button, set_enabled
+from ui.widgets import (
+    confirm_dialog,
+    hairline,
+    secondary_button,
+    segmented,
+    set_enabled,
+    tooltip,
+)
 from version import __version__
 
 
@@ -153,7 +160,7 @@ class FileOrganizerApp(ctk.CTk):
                 self.after(0, func, *args)
 
     # ------------------------------------------------------------------
-    # Layout: sidebar | view, status bar below
+    # Layout: sidebar | toolbar, view, status line
     # ------------------------------------------------------------------
 
     def _build_layout(self):
@@ -162,12 +169,31 @@ class FileOrganizerApp(ctk.CTk):
 
         self._build_sidebar()
 
-        content = ctk.CTkFrame(self, fg_color="transparent")
-        content.grid(row=0, column=1, padx=3 * t.SPACE, pady=(3 * t.SPACE, 2 * t.SPACE), sticky="nsew")
+        main = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
+        main.grid(row=0, column=1, sticky="nsew")
+        main.grid_columnconfigure(0, weight=1)
+        main.grid_rowconfigure(1, weight=1)
+
+        # Toolbar: where am I (title), what is this (subtitle), and the global Undo.
+        toolbar = ctk.CTkFrame(main, fg_color="transparent")
+        toolbar.grid(row=0, column=0, padx=t.MARGIN, pady=(20, 16), sticky="ew")
+        toolbar.grid_columnconfigure(0, weight=1)
+        self.title_label = ctk.CTkLabel(toolbar, text="", font=t.font("title"), text_color=t.TEXT, anchor="w")
+        self.title_label.grid(row=0, column=0, sticky="w")
+        self.subtitle_label = ctk.CTkLabel(
+            toolbar, text="", font=t.font("body"), text_color=t.TEXT_MUTED, anchor="w"
+        )
+        self.subtitle_label.grid(row=1, column=0, sticky="w")
+        self.undo_button = secondary_button(toolbar, "Undo", self.execute_undo)
+        self.undo_button.grid(row=0, column=1, rowspan=2, sticky="e")
+        tooltip(self.undo_button, self._undo_tooltip)
+
+        content = ctk.CTkFrame(main, fg_color="transparent")
+        content.grid(row=1, column=0, padx=t.MARGIN, sticky="nsew")
         content.grid_columnconfigure(0, weight=1)
         content.grid_rowconfigure(0, weight=1)
 
-        self._build_status_bar()
+        self._build_status_line(main)
 
         # Views are built once and toggled, so their state survives switching.
         self.organize = OrganizeView(content, self)
@@ -177,44 +203,48 @@ class FileOrganizerApp(ctk.CTk):
         self.update_undo_state()
 
     def _build_sidebar(self):
-        bar = ctk.CTkFrame(self, fg_color=t.SURFACE, corner_radius=0, width=t.SIDEBAR_WIDTH)
+        bar = ctk.CTkFrame(self, fg_color=t.SIDEBAR, corner_radius=0, width=t.SIDEBAR_WIDTH)
         bar.grid(row=0, column=0, sticky="ns")
         bar.grid_propagate(False)
         bar.grid_columnconfigure(0, weight=1)
-        bar.grid_rowconfigure(4, weight=1)
+        bar.grid_rowconfigure(5, weight=1)
         pad = 2 * t.SPACE
 
         brand = ctk.CTkFrame(bar, fg_color="transparent")
-        brand.grid(row=0, column=0, padx=pad, pady=(pad + 4, pad), sticky="w")
+        brand.grid(row=0, column=0, padx=pad, pady=(20, 20), sticky="w")
         icon_path = _resource_path("organizer-small.png")
         if icon_path.exists():
             with contextlib.suppress(Exception):
-                self.brand_icon = ctk.CTkImage(Image.open(icon_path), size=(28, 28))
+                self.brand_icon = ctk.CTkImage(Image.open(icon_path), size=(24, 24))
                 ctk.CTkLabel(brand, image=self.brand_icon, text="").pack(side="left", padx=(0, t.SPACE))
-        ctk.CTkLabel(brand, text="File Suite", font=t.font("section"), text_color=t.TEXT).pack(side="left")
+        ctk.CTkLabel(brand, text="File Suite", font=t.font("headline"), text_color=t.TEXT).pack(side="left")
 
-        # Folder card: replaces the old disabled path entry
-        ctk.CTkLabel(
-            bar, text="FOLDER", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
-        ).grid(row=1, column=0, padx=pad, sticky="w")
-        folder = ctk.CTkFrame(bar, fg_color=t.SURFACE_2, corner_radius=t.CARD_RADIUS)
-        folder.grid(row=2, column=0, padx=pad - 4, pady=(4, pad), sticky="ew")
+        # Folder: the one thing every view works on
+        ctk.CTkLabel(bar, text="Folder", font=t.font("caption_bold"), text_color=t.TEXT_MUTED, anchor="w").grid(
+            row=1, column=0, padx=pad, sticky="w"
+        )
+        folder = ctk.CTkFrame(bar, fg_color="transparent")
+        folder.grid(row=2, column=0, padx=pad, pady=(2, 20), sticky="ew")
         folder.grid_columnconfigure(0, weight=1)
         self.folder_name_label = ctk.CTkLabel(
-            folder, text="", font=t.font("body_bold"), text_color=t.TEXT, anchor="w"
+            folder, text="", font=t.font("headline"), text_color=t.TEXT, anchor="w"
         )
-        self.folder_name_label.grid(row=0, column=0, padx=12, pady=(10, 0), sticky="ew")
+        self.folder_name_label.grid(row=0, column=0, sticky="ew")
         self.folder_path_label = ctk.CTkLabel(
             folder, text="", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
         )
-        self.folder_path_label.grid(row=1, column=0, padx=12, sticky="ew")
-        secondary_button(folder, "Change folder…  Ctrl+O", self.select_folder, small=True).grid(
-            row=2, column=0, padx=12, pady=(6, 12), sticky="ew"
-        )
+        self.folder_path_label.grid(row=1, column=0, sticky="ew")
+        tooltip(self.folder_path_label, lambda: str(self.current_path))
+        change = secondary_button(folder, "Change…", self.select_folder, small=True, fg_color=t.SURFACE)
+        change.grid(row=2, column=0, pady=(8, 0), sticky="w")
+        tooltip(change, "Choose another folder  (Ctrl+O)")
         self._show_folder()
 
+        ctk.CTkLabel(bar, text="Tools", font=t.font("caption_bold"), text_color=t.TEXT_MUTED, anchor="w").grid(
+            row=3, column=0, padx=pad, sticky="w"
+        )
         nav = ctk.CTkFrame(bar, fg_color="transparent")
-        nav.grid(row=3, column=0, padx=pad - 4, sticky="ew")
+        nav.grid(row=4, column=0, padx=t.SPACE, pady=(2, 0), sticky="ew")
         nav.grid_columnconfigure(0, weight=1)
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         for idx, (key, label) in enumerate(
@@ -224,45 +254,55 @@ class FileOrganizerApp(ctk.CTk):
                 nav,
                 text=label,
                 anchor="w",
-                height=t.BUTTON_HEIGHT,
+                height=t.SMALL_BUTTON_HEIGHT,
                 corner_radius=t.BUTTON_RADIUS,
                 font=t.font("body"),
                 fg_color="transparent",
-                hover_color=t.SURFACE_2,
+                hover_color=t.SIDEBAR_HOVER,
                 text_color=t.TEXT,
                 command=lambda k=key: self.show_view(k),
             )
-            button.grid(row=idx, column=0, pady=2, sticky="ew")
+            button.grid(row=idx, column=0, pady=1, sticky="ew")
+            tooltip(button, f"Ctrl+{idx + 1}")
             self.nav_buttons[key] = button
-        ctk.CTkLabel(
-            nav, text="Ctrl+1 / 2 / 3 to switch", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
-        ).grid(row=3, column=0, padx=12, pady=(2, 0), sticky="w")
-
-        self.undo_button = secondary_button(bar, "Undo", self.execute_undo, height=64, font=t.font("caption"))
-        self.undo_button.grid(row=5, column=0, padx=pad - 4, pady=(0, t.SPACE), sticky="ew")
+        # Count of new warnings/errors, like an unread badge
+        self.activity_badge = ctk.CTkLabel(
+            self.nav_buttons["activity"],
+            text="",
+            font=t.font("caption"),
+            text_color=t.TEXT,
+            fg_color=t.NEUTRAL_PRESSED,
+            corner_radius=9,
+            width=22,
+            height=18,
+        )
 
         foot = ctk.CTkFrame(bar, fg_color="transparent")
         foot.grid(row=6, column=0, padx=pad, pady=(0, pad), sticky="ew")
-        ctk.CTkLabel(foot, text=f"v{__version__}", font=t.font("caption"), text_color=t.TEXT_MUTED).pack(side="left")
-        self.theme_button = secondary_button(foot, "", self._toggle_theme, small=True, width=84)
-        self.theme_button.pack(side="right")
-        self._update_theme_button()
+        foot.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(foot, text="Appearance", font=t.font("caption_bold"), text_color=t.TEXT_MUTED, anchor="w").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.appearance = segmented(foot, ["Auto", "Light", "Dark"], self._set_appearance)
+        self.appearance.set("Auto")
+        self.appearance.grid(row=1, column=0, pady=(4, 12), sticky="ew")
+        ctk.CTkLabel(
+            foot, text=f"Version {__version__}", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
+        ).grid(row=2, column=0, sticky="w")
 
     def _show_folder(self):
         path = self.current_path
-        self.folder_name_label.configure(text=truncate_middle(path.name or str(path), 22))
-        self.folder_path_label.configure(text=truncate_middle(str(path), 26))
+        self.folder_name_label.configure(text=truncate_middle(path.name or str(path), 24))
+        self.folder_path_label.configure(text=truncate_middle(str(path), 30))
 
-    def _build_status_bar(self):
-        bar = ctk.CTkFrame(self, fg_color=t.SURFACE, corner_radius=0, height=32)
-        bar.grid(row=1, column=0, columnspan=2, sticky="ew")
-        bar.grid_columnconfigure(1, weight=1)
-        self.status_dot = ctk.CTkLabel(bar, text="●", font=t.font("caption"), text_color=t.TEXT_MUTED)
-        self.status_dot.grid(row=0, column=0, padx=(2 * t.SPACE, t.SPACE), pady=4)
-        self.status_label = ctk.CTkLabel(
-            bar, text="Ready.", font=t.font("caption"), text_color=t.TEXT, anchor="w"
-        )
-        self.status_label.grid(row=0, column=1, sticky="ew", pady=4)
+    def _build_status_line(self, main):
+        hairline(main).grid(row=2, column=0, sticky="ew", pady=(16, 0))
+        line = ctk.CTkFrame(main, fg_color="transparent")
+        line.grid(row=3, column=0, padx=t.MARGIN, pady=6, sticky="ew")
+        self.status_dot = ctk.CTkLabel(line, text="●", font=t.font("caption"), text_color=t.TEXT_MUTED, width=10)
+        self.status_dot.pack(side="left", padx=(0, 6))
+        self.status_label = ctk.CTkLabel(line, text="Ready.", font=t.font("caption"), text_color=t.TEXT_MUTED)
+        self.status_label.pack(side="left")
 
     _STATUS_COLORS = {
         "info": t.TEXT_MUTED,
@@ -273,7 +313,7 @@ class FileOrganizerApp(ctk.CTk):
     }
 
     def set_status(self, kind: str, message: str):
-        """Status bar: coloured dot (info/busy/success/warning/error) and one sentence."""
+        """Status line: coloured dot (info/busy/success/warning/error) and one sentence."""
         self.status_dot.configure(text_color=self._STATUS_COLORS[kind])
         self.status_label.configure(text=message)
 
@@ -285,31 +325,32 @@ class FileOrganizerApp(ctk.CTk):
                 view.grid(row=0, column=0, sticky="nsew")
             else:
                 view.grid_remove()
-            self.nav_buttons[key].configure(
-                fg_color=t.ACCENT_SOFT if active else "transparent",
-                font=t.font("body_bold" if active else "body"),
-            )
+            self.nav_buttons[key].configure(fg_color=t.SIDEBAR_SELECTED if active else "transparent")
+        self.title_label.configure(text=self.views[name].TITLE)
+        self.subtitle_label.configure(text=self.views[name].SUBTITLE)
         if name == "activity":
             self._unseen_problems = 0
-            self._update_activity_badge()
+        self._update_activity_badge()
 
     def _update_activity_badge(self):
         n = self._unseen_problems
-        self.nav_buttons["activity"].configure(text=f"Activity  ({n})" if n else "Activity")
+        if n:
+            selected = self.current_view == "activity"
+            self.activity_badge.configure(
+                text=str(n) if n < 100 else "99+", bg_color=t.SIDEBAR_SELECTED if selected else t.SIDEBAR
+            )
+            self.activity_badge.place(relx=1.0, rely=0.5, x=-8, anchor="e")
+        else:
+            self.activity_badge.place_forget()
 
-    def _toggle_theme(self):
-        ctk.set_appearance_mode("Dark" if ctk.get_appearance_mode() == "Light" else "Light")
-
-    def _update_theme_button(self):
-        light = ctk.get_appearance_mode() == "Light"
-        self.theme_button.configure(text="☾ Dark" if light else "☀ Light")
+    def _set_appearance(self, choice: str):
+        ctk.set_appearance_mode("System" if choice == "Auto" else choice)
 
     def _on_appearance_change(self, _mode: str):
         if self._is_closing:
             return
         t.apply_treeview_style(self)
         self.activity.apply_colors()
-        self._update_theme_button()
 
     def _bind_shortcuts(self):
         """Window-wide keys. Dialogs are separate toplevels, so these do not fire there."""
@@ -375,11 +416,16 @@ class FileOrganizerApp(ctk.CTk):
         """Global Undo button: says what will be undone, disabled when nothing can be."""
         res = self.last_execution_result
         available = bool(res and res.success_count > 0)
-        label = undo_label(res)
-        # "Undo: Organize · 17 files · 20:14" on three lines to fit the sidebar
-        text = label.replace("Undo: ", "↶ Undo  Ctrl+Z\n", 1).replace(" · ", "\n", 1) if available else "↶ Undo"
+        # Like an Edit menu: "Undo Organize"; count and time are in the tooltip.
+        text = f"Undo {res.description or 'Last Move'}" if available else "Undo"
         self.undo_button.configure(text=text)
         set_enabled(self.undo_button, available)
+
+    def _undo_tooltip(self) -> str:
+        res = self.last_execution_result
+        if not (res and res.success_count > 0):
+            return "Nothing to undo"
+        return f"{undo_label(res)}  (Ctrl+Z)"
 
     def apply_plan(self, plan: OperationPlan) -> ExecutionResult | None:
         """Execute a previewed organization plan; the view reports the result. None if nothing ran."""
@@ -492,7 +538,7 @@ class FileOrganizerApp(ctk.CTk):
 
         if not self.current_path.exists() or not self.current_path.is_dir():
             self.duplicates.banner.show(
-                "error", "This folder no longer exists", "Choose another folder in the sidebar (Ctrl+O)."
+                "error", "This folder no longer exists", "Choose another folder in the sidebar."
             )
             return
 
@@ -595,7 +641,7 @@ class FileOrganizerApp(ctk.CTk):
                 f"Found {len(groups)} duplicate group(s), {total_dup_files} redundant copies ({total_reclaimable} reclaimable).",
             )
 
-        self.duplicates.set_progress_text(f"Scanned at {datetime.now():%H:%M}.  Ctrl+Enter to scan again")
+        self.duplicates.set_progress_text(f"Last scanned at {datetime.now():%H:%M}")
         self.duplicates.scan_finished()
 
     # ------------------------------------------------------------------
@@ -687,7 +733,7 @@ class FileOrganizerApp(ctk.CTk):
             self.set_status("busy", f"Moving {plan.affected_count} duplicates…")
             with self._busy():
                 result = execute_operation_plan(plan)
-            result.description = "Duplicates moved"  # label for the Undo button
+            result.description = "Move to Duplicates"  # label for the Undo button
             self.last_execution_result = result
             self.update_undo_state()
 

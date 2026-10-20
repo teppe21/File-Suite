@@ -15,10 +15,14 @@ from ui.widgets import (
     Banner,
     Card,
     EmptyState,
+    hairline,
     primary_button,
+    scrollbar,
     secondary_button,
+    set_default,
     set_enabled,
-    view_header,
+    text_field,
+    tooltip,
 )
 
 _COLUMNS = (
@@ -32,6 +36,9 @@ _COLUMNS = (
 
 
 class OrganizeView(ctk.CTkFrame):
+    TITLE = "Organize"
+    SUBTITLE = "Sort the loose files in this folder into category folders."
+
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app = app
@@ -47,10 +54,6 @@ class OrganizeView(ctk.CTkFrame):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
-
-        view_header(
-            self, "Organize files", "Sort the loose files in this folder into category subfolders."
-        ).grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         self.banner = Banner(self)
         self.banner.grid(row=1, column=0, sticky="ew", pady=(0, 2 * t.SPACE))
@@ -69,75 +72,69 @@ class OrganizeView(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _build_rules(self) -> Card:
-        card = Card(self, "Rules")
+        card = Card(self, "Categories")
         body = card.body
-        body.grid_columnconfigure((0, 1), weight=1, uniform="rules")
+        # Two pairs of grid columns (box, hint) so the hints line up without fixed widths.
+        cats = ctk.CTkFrame(body, fg_color="transparent")
+        cats.grid(row=0, column=0, columnspan=2, sticky="ew")
+        cats.grid_columnconfigure((1, 3), weight=1)
 
         for idx, (cat_name, var) in enumerate(self.cat_vars.items()):
-            cell = ctk.CTkFrame(body, fg_color="transparent")
-            cell.grid(row=idx // 2, column=idx % 2, sticky="w", pady=1)
+            row, col = idx // 2, (idx % 2) * 2
             ctk.CTkCheckBox(
-                cell,
+                cats,
                 text=cat_name,
+                width=0,
                 variable=var,
                 font=t.font("body"),
                 text_color=t.TEXT,
                 fg_color=t.ACCENT,
                 hover_color=t.ACCENT_HOVER,
-                border_color=t.TEXT_MUTED,
+                border_color=t.FIELD_BORDER,
+                border_width=2,
                 checkmark_color=t.ON_ACCENT,
-                checkbox_width=20,
-                checkbox_height=20,
+                checkbox_width=18,
+                checkbox_height=18,
                 corner_radius=4,
-            ).pack(side="left")
+            ).grid(row=row, column=col, sticky="w", pady=2)
             ctk.CTkLabel(
-                cell,
+                cats,
                 text=extension_preview(CATEGORIES[cat_name]),
                 font=t.font("caption"),
                 text_color=t.TEXT_MUTED,
-            ).pack(side="left", padx=(t.SPACE, 0))
+                anchor="w",
+            ).grid(row=row, column=col + 1, sticky="w", padx=(12, 2 * t.SPACE))
 
-        # Inputs and the Preview button share one row to leave height for the preview.
+        hairline(body).grid(row=3, column=0, columnspan=2, sticky="ew", pady=12)
+
+        # Options and the Preview button share one row to leave height for the preview.
         inputs = ctk.CTkFrame(body, fg_color="transparent")
-        inputs.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(t.SPACE, 0))
+        inputs.grid(row=4, column=0, columnspan=2, sticky="ew")
         inputs.grid_columnconfigure((0, 1), weight=1, uniform="inputs")
         for col, (label, var, hint) in enumerate(
             (
-                ("Extra extensions", self.extra_ext_var, "e.g. .iso, .blend"),
-                ("One subfolder for everything", self.custom_folder_var, "optional"),
+                ("Extra extensions", self.extra_ext_var, "For example: .iso, .blend"),
+                ("Put everything in one folder", self.custom_folder_var, "Optional. Leave empty for one folder per category."),
             )
         ):
             padx = (0, 2 * t.SPACE)
-            heading = ctk.CTkFrame(inputs, fg_color="transparent")
-            heading.grid(row=0, column=col, sticky="w", padx=padx)
-            ctk.CTkLabel(heading, text=label, font=t.font("caption"), text_color=t.TEXT).pack(side="left")
-            ctk.CTkLabel(heading, text=f"  {hint}", font=t.font("caption"), text_color=t.TEXT_MUTED).pack(
-                side="left"
+            ctk.CTkLabel(inputs, text=label, font=t.font("caption_bold"), text_color=t.TEXT, anchor="w").grid(
+                row=0, column=col, sticky="w", padx=padx, pady=(0, 4)
             )
-            entry = ctk.CTkEntry(
-                inputs,
-                textvariable=var,
-                height=t.BUTTON_HEIGHT,
-                corner_radius=t.BUTTON_RADIUS,
-                border_width=1,
-                border_color=t.BORDER,
-                fg_color=t.SURFACE_2,
-                text_color=t.TEXT,
-                font=t.font("body"),
-            )
+            entry = text_field(inputs, var)
             entry.grid(row=1, column=col, sticky="ew", padx=padx)
             entry.bind("<Return>", lambda _e: self.generate_preview())
+            tooltip(entry, hint)
 
-        ctk.CTkLabel(inputs, text="Ctrl+Enter", font=t.font("caption"), text_color=t.TEXT_MUTED).grid(
-            row=0, column=2, sticky="e"
-        )
-        primary_button(inputs, "Preview changes", self.generate_preview).grid(row=1, column=2, sticky="e")
+        self.preview_button = primary_button(inputs, "Preview", self.generate_preview, width=96)
+        self.preview_button.grid(row=1, column=2, sticky="e")
+        tooltip(self.preview_button, "Show what would move. Nothing changes yet.  (Ctrl+Enter)")
         return card
 
     def _build_preview(self) -> Card:
         card = Card(self, "Preview")
-        # Summary sits on the title line: "Preview   17 files · 42.3 MB · 1 rename"
-        self.summary_label = ctk.CTkLabel(card.header, text="", font=t.font("body"), text_color=t.TEXT)
+        # Summary sits on the title line: "Preview      17 files · 42.3 MB · 1 rename"
+        self.summary_label = ctk.CTkLabel(card.header, text="", font=t.font("body"), text_color=t.TEXT_MUTED)
         self.summary_label.grid(row=0, column=1, sticky="e")
         body = card.body
         body.grid_rowconfigure(0, weight=1)
@@ -152,7 +149,7 @@ class OrganizeView(ctk.CTkFrame):
         self.categories_label = ctk.CTkLabel(
             self.table, text="", font=t.font("caption"), text_color=t.TEXT_MUTED, anchor="w"
         )
-        self.categories_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        self.categories_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
 
         self.tree = ttk.Treeview(
             self.table, columns=[c[0] for c in _COLUMNS], show="headings", selectmode="browse"
@@ -162,21 +159,18 @@ class OrganizeView(ctk.CTkFrame):
             self.tree.heading(col, text=heading, anchor=anchor, command=lambda c=col: self._sort_by(c))
             self.tree.column(col, width=round(width * scale), minwidth=round(48 * scale), stretch=stretch, anchor=anchor)
         self.tree.grid(row=1, column=0, sticky="nsew")
-        scroll = ctk.CTkScrollbar(self.table, command=self.tree.yview)
+        scroll = scrollbar(self.table, self.tree)
         scroll.grid(row=1, column=1, sticky="ns")
-        self.tree.configure(yscrollcommand=scroll.set)
         t.register_tree_tags(self.tree, {"collision": {"foreground": t.WARNING}})
         return card
 
     def _build_footer(self) -> ctk.CTkFrame:
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        self.move_button = primary_button(footer, "Move files", self.apply)
+        self.move_button = primary_button(footer, "Move Files", self.apply, width=120)
         self.move_button.pack(side="right")
-        self.discard_button = secondary_button(footer, "Discard", self.clear_preview)
+        tooltip(self.move_button, "Move the previewed files into their folders. You can undo this.  (Ctrl+M)")
+        self.discard_button = secondary_button(footer, "Discard Preview", self.clear_preview)
         self.discard_button.pack(side="right", padx=(0, t.SPACE))
-        ctk.CTkLabel(footer, text="Ctrl+M", font=t.font("caption"), text_color=t.TEXT_MUTED).pack(
-            side="right", padx=(0, 2 * t.SPACE)
-        )
         return footer
 
     # ------------------------------------------------------------------
@@ -192,7 +186,9 @@ class OrganizeView(ctk.CTkFrame):
     def _set_footer(self, count: int):
         set_enabled(self.discard_button, self.plan is not None)
         set_enabled(self.move_button, count > 0)
-        self.move_button.configure(text=f"Move {plural(count, 'file')}" if count else "Move files")
+        self.move_button.configure(text=f"Move {plural(count, 'File', 'Files')}" if count else "Move Files")
+        # One default action at a time: Preview until there is something to move, then Move.
+        set_default(self.preview_button, count == 0)
 
     def clear_preview(self, title: str = "No preview yet", text: str | None = None):
         """Forget the current plan; rules and inputs are kept."""
@@ -316,7 +312,7 @@ class OrganizeView(ctk.CTkFrame):
             self.banner.show(
                 "success",
                 f"Moved {plural(moved, 'file')}",
-                "They are in their new folders. Undo is in the sidebar (Ctrl+Z).",
+                "They are in their new folders. Use Undo in the toolbar to put them back.",
                 ("Undo", self.app.execute_undo),
             )
             return
