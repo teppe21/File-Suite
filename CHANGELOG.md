@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - README shortened; safety, architecture and release details moved to docs/.
+- **Redesigned interface**: what the app does to files is unchanged.
+  - A sidebar shows the current folder, switches between Organize, Duplicates and Activity, and holds one Undo button that works from every view and says what it will undo (for example "Organize · 17 files · 20:14").
+  - Colours follow the app icon; light and dark mode (follows the system, with a toggle); larger text.
+  - Organize: each category shows the extensions it covers; the preview is a sortable table with file sizes, files per category and renames spelled out. Typed rules and an open preview are kept when you switch views or move files; changing the rules clears an old preview.
+  - Duplicates: one list with tick boxes, file size and modified time; a live summary of what is selected and how much space it frees; a group with every copy ticked is marked right away. Ticking stays fast with many groups. Results are marked out of date after files were organized or an undo, with a Rescan button.
+  - Activity: warnings and errors are coloured, can be filtered, copied or saved, and a counter on the sidebar shows new ones.
+  - Results appear as messages inside the view instead of pop-ups; confirmations list the file count, size, destination and whether the action can be undone, including the permanent-delete warning for drives without a Recycle Bin.
+  - Keyboard shortcuts: Ctrl+O, Ctrl+1/2/3, Ctrl+Enter, Ctrl+M, Ctrl+Z, Space, Delete, Esc.
 
 ---
 
