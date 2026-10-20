@@ -72,9 +72,10 @@ graph TD
 
 - **Duplicate scan**: Runs on a background thread with 64 KB SHA-256 chunks, live progress and immediate cancellation.
 - **Deterministic originals**: Files in a group are sorted case-insensitively, so the default original is the same regardless of directory iteration order.
-- **Duplicate view**: Groups are shown as cards with the SHA-256 prefix and file size. "Select Duplicates" selects every copy except the original; "Clear Selection" clears it. Selected files go into a `Duplicates/` folder (undoable) or to the system trash.
+- **Duplicate view**: Groups are shown in a tree (one row per group, one per file with a tick box, size, modified time and role). "Select all extra copies" ticks every copy except the original; "Clear selection" clears it. A group with every copy ticked is highlighted live. Selected files go into a `Duplicates/` folder (undoable) or to the system trash.
 - **Reclaimable space**: Hard links that share an inode are counted once.
-- **Logging**: Timestamped records go to the in-app Activity Log and to the console.
+- **Logging**: Timestamped records go to the in-app Activity view (filter by level, copy, save as text) and to the console.
+- **UI**: CustomTkinter with `ttk.Treeview` tables. Views are built once and shown or hidden, so their state survives switching. Colours follow the app icon in light and dark mode (`ui/theme.py`). Keyboard: Ctrl+O folder, Ctrl+1/2/3 views, Ctrl+Enter preview or scan, Ctrl+M move, Ctrl+Z undo, Space tick, Delete trash (duplicates list), Esc closes dialogs.
 - **Folder picker**: On Linux, `zenity` (GTK/GNOME) or `kdialog` (KDE) is used if installed, with the Tkinter dialog as fallback.
 
 Safety rules are listed in [SAFETY.md](SAFETY.md).

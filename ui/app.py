@@ -38,9 +38,15 @@ from platform_utils import IS_WINDOWS, trash_label, trash_may_be_permanent
 from ui import theme as t
 from ui.activity_view import ActivityView
 from ui.duplicates_view import DuplicatesView, group_label
-from ui.formatting import format_log_line, format_size, truncate_middle, undo_label
+from ui.formatting import (
+    format_log_line,
+    format_size,
+    plural,
+    truncate_middle,
+    undo_label,
+)
 from ui.organize_view import OrganizeView
-from ui.widgets import secondary_button, set_enabled
+from ui.widgets import confirm_dialog, secondary_button, set_enabled
 from version import __version__
 
 
@@ -89,8 +95,9 @@ class FileOrganizerApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         t.apply_treeview_style(self)
-        ctk.AppearanceModeTracker.add(self._on_appearance_change, self)
         self._build_layout()
+        ctk.AppearanceModeTracker.add(self._on_appearance_change, self)
+        self._bind_shortcuts()
         self.show_view("organize")
         self.log("INFO", f"File Suite initialized. Active directory: {self.current_path}")
 
@@ -289,7 +296,43 @@ class FileOrganizerApp(ctk.CTk):
         if self._is_closing:
             return
         t.apply_treeview_style(self)
+        self.activity.apply_colors()
         self._update_theme_button()
+
+    def _bind_shortcuts(self):
+        """Window-wide keys. Dialogs are separate toplevels, so these do not fire there."""
+
+        def key(sequence, action):
+            def handler(_event):
+                action()
+                return "break"
+
+            self.bind(sequence, handler)
+
+        for letter, action in (("o", self.select_folder), ("z", self.execute_undo), ("m", self._move_shortcut)):
+            key(f"<Control-{letter}>", action)
+            key(f"<Control-{letter.upper()}>", action)  # with Caps Lock on
+        for number, view in (("1", "organize"), ("2", "duplicates"), ("3", "activity")):
+            key(f"<Control-Key-{number}>", lambda v=view: self.show_view(v))
+        key("<Control-Return>", self._run_shortcut)
+        key("<Control-KP_Enter>", self._run_shortcut)
+
+    def _run_shortcut(self):
+        """Ctrl+Enter: preview in Organize, scan in Duplicates."""
+        if self.current_view == "organize":
+            self.organize.generate_preview()
+        elif self.current_view == "duplicates":
+            self.start_duplicate_scan()
+
+    def _move_shortcut(self):
+        """Ctrl+M: the view's move button (organize moves; duplicates asks first)."""
+        if self.current_view == "organize":
+            self.organize.apply()
+        elif self.current_view == "duplicates":
+            self.move_selected_duplicates()
+
+    def _current_banner(self):
+        return self.duplicates.banner if self.current_view == "duplicates" else self.organize.banner
 
     # ------------------------------------------------------------------
     # Activity log
@@ -309,6 +352,8 @@ class FileOrganizerApp(ctk.CTk):
     def clear_log(self):
         self.log_entries.clear()
         self.activity.reload()
+        self._unseen_problems = 0
+        self._update_activity_badge()
 
     # ------------------------------------------------------------------
     # Organize & undo
@@ -368,9 +413,17 @@ class FileOrganizerApp(ctk.CTk):
             return
 
         res = self.last_execution_result
-        if not messagebox.askyesno(
-            "Confirm Undo",
-            f"Restore {res.success_count} file(s) back to their original root directory?",
+        if not confirm_dialog(
+            self,
+            "Undo the last move?",
+            f"Restore {plural(res.success_count, 'file')} back to their original location.",
+            details=[
+                ("Operation", res.description or "Last move"),
+                ("Files", plural(res.success_count, "file")),
+                ("Done at", f"{res.timestamp:%H:%M}"),
+                ("Can be undone", "No"),
+            ],
+            confirm_text="Undo",
         ):
             return
 
@@ -392,11 +445,13 @@ class FileOrganizerApp(ctk.CTk):
                 self.log("ERROR", f"Undo encountered {failed} error(s).")
                 for err in errors:
                     self.log("ERROR", f"  {err}")
-                messagebox.showwarning(
-                    "Undo Finished with Errors",
-                    f"What happened:\n{undone} file(s) were restored, but {failed} could not be restored.\n\n"
-                    "Why:\nOriginal locations may be occupied by newly created files, or destination files were modified.\n\n"
-                    "Next steps:\nReview the Activity view for details on un-restored items.",
+                self._current_banner().show(
+                    "warning" if undone else "error",
+                    f"Restored {undone} of {plural(undone + failed, 'file')}",
+                    f"What happened: {plural(failed, 'file')} could not be restored.  "
+                    "Why: the original location may be taken by a new file, or the moved file "
+                    "was changed.  Next steps: open Activity for each file; Undo can be retried.",
+                    ("Open Activity", lambda: self.show_view("activity")),
                 )
 
             self.set_status(
@@ -422,7 +477,9 @@ class FileOrganizerApp(ctk.CTk):
             return
 
         if not self.current_path.exists() or not self.current_path.is_dir():
-            messagebox.showerror("Error", "Selected target directory does not exist.")
+            self.duplicates.banner.show(
+                "error", "This folder no longer exists", "Choose another folder in the sidebar (Ctrl+O)."
+            )
             return
 
         self._is_scanning = True
@@ -534,6 +591,9 @@ class FileOrganizerApp(ctk.CTk):
     def _get_selected_duplicate_paths(self) -> list[Path]:
         return [f.path for group in self.duplicate_groups for f in group.files if f.selected]
 
+    def _selected_size(self) -> int:
+        return sum(f.size for group in self.duplicate_groups for f in group.files if f.selected)
+
     def _refuse_if_no_kept_copy(self) -> bool:
         """Show an error and return True when some group would lose every copy."""
         unkept = groups_without_kept_copy(self.duplicate_groups)
@@ -577,14 +637,22 @@ class FileOrganizerApp(ctk.CTk):
 
         selected = self._get_selected_duplicate_paths()
         if not selected:
-            messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to isolate.")
+            self.duplicates.banner.show("info", "Nothing selected", "Tick the copies you want to move.")
             return
         if self._refuse_if_no_kept_copy():
             return
 
-        if not messagebox.askyesno(
-            "Confirm Isolation",
-            f"Move {len(selected)} selected duplicate file(s) into 'Duplicates/' folder?\n(You can undo this operation afterward).",
+        if not confirm_dialog(
+            self,
+            "Move duplicates?",
+            f"Move {plural(len(selected), 'selected duplicate')} into a “Duplicates” folder inside this folder.",
+            details=[
+                ("Files", plural(len(selected), "file")),
+                ("Total size", format_size(self._selected_size())),
+                ("Destination", f"{self.current_path.name}/Duplicates/"),
+                ("Can be undone", "Yes"),
+            ],
+            confirm_text=f"Move {plural(len(selected), 'file')}",
         ):
             return
 
@@ -643,17 +711,31 @@ class FileOrganizerApp(ctk.CTk):
 
         selected = self._get_selected_duplicate_paths()
         if not selected:
-            messagebox.showinfo("No Files Selected", "Please select at least one duplicate file to trash.")
+            self.duplicates.banner.show("info", "Nothing selected", "Tick the copies you want to remove.")
             return
         if self._refuse_if_no_kept_copy():
             return
 
         # The scan is non-recursive, so every selected file is on this folder's drive.
         may_be_permanent = trash_may_be_permanent(self.duplicate_scan_dir)
-        confirm_text = f"Send {len(selected)} selected duplicate file(s) to the {trash_label()}?\n\nNote: Undo from application is unavailable for trashed files."
-        if may_be_permanent:
-            confirm_text += f"\n\nFiles on this drive may be deleted permanently instead of being sent to the {trash_label()}."
-        if not messagebox.askyesno(f"Confirm {trash_label().title()}", confirm_text):
+        if not confirm_dialog(
+            self,
+            f"Send duplicates to the {trash_label()}?",
+            f"Send {plural(len(selected), 'selected duplicate')} to the {trash_label()}.",
+            details=[
+                ("Files", plural(len(selected), "file")),
+                ("Total size", format_size(self._selected_size())),
+                ("Destination", trash_label()[:1].upper() + trash_label()[1:]),
+                ("Can be undone", f"Not from the app; restore from the {trash_label()}"),
+            ],
+            confirm_text=f"Send {plural(len(selected), 'file')} to {trash_label()}",
+            destructive=True,
+            warning=(
+                f"Files on this drive may be deleted permanently instead of being sent to the {trash_label()}."
+                if may_be_permanent
+                else None
+            ),
+        ):
             return
 
         self._is_executing = True

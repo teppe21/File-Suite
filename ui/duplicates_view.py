@@ -144,6 +144,7 @@ class DuplicatesView(ctk.CTkFrame):
         )
         self.tree.bind("<Button-1>", self._on_click)
         self.tree.bind("<space>", self._on_space)
+        self.tree.bind("<Delete>", lambda _e: self.app.trash_selected_duplicates())
 
         self.empty = EmptyState(body, "Scan this folder", self.app.start_duplicate_scan)
         self.empty.grid(row=0, column=0, rowspan=4, columnspan=2, sticky="nsew")
@@ -153,7 +154,7 @@ class DuplicatesView(ctk.CTkFrame):
         footer = ctk.CTkFrame(self, fg_color="transparent")
         self.move_button = primary_button(footer, "Move to “Duplicates” folder", self.app.move_selected_duplicates)
         self.move_button.grid(row=0, column=2)
-        ctk.CTkLabel(footer, text="can be undone", font=t.font("caption"), text_color=t.TEXT_MUTED).grid(
+        ctk.CTkLabel(footer, text="can be undone · Ctrl+M", font=t.font("caption"), text_color=t.TEXT_MUTED).grid(
             row=1, column=2
         )
         self.trash_button = danger_button(
@@ -161,7 +162,7 @@ class DuplicatesView(ctk.CTkFrame):
         )
         self.trash_button.grid(row=0, column=1, padx=(0, t.SPACE))
         ctk.CTkLabel(
-            footer, text="can't be undone here", font=t.font("caption"), text_color=t.TEXT_MUTED
+            footer, text="can't be undone here · Del", font=t.font("caption"), text_color=t.TEXT_MUTED
         ).grid(row=1, column=1, padx=(0, t.SPACE))
         ctk.CTkLabel(
             footer, text="Click ☐ or press Space to tick", font=t.font("caption"), text_color=t.TEXT_MUTED
@@ -202,6 +203,12 @@ class DuplicatesView(ctk.CTkFrame):
     def scan_finished(self):
         self._scanned = True
         self.render_groups()
+        # Keyboard users can tick (Space), trash (Delete) and navigate (arrows) right away.
+        first_file = next(iter(self._file_rows), None)
+        if first_file and self.winfo_ismapped():
+            self.tree.focus_set()
+            self.tree.focus(first_file)
+            self.tree.selection_set(first_file)
 
     def reset(self):
         """Folder changed: back to the "no scan yet" state."""

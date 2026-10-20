@@ -174,6 +174,9 @@ class OrganizeView(ctk.CTkFrame):
         self.move_button.pack(side="right")
         self.discard_button = secondary_button(footer, "Discard", self.clear_preview)
         self.discard_button.pack(side="right", padx=(0, t.SPACE))
+        ctk.CTkLabel(footer, text="Ctrl+M", font=t.font("caption"), text_color=t.TEXT_MUTED).pack(
+            side="right", padx=(0, 2 * t.SPACE)
+        )
         return footer
 
     # ------------------------------------------------------------------

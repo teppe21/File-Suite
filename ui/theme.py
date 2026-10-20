@@ -68,27 +68,6 @@ def pick(token: tuple[str, str] | str) -> str:
     return token[0] if ctk.get_appearance_mode() == "Light" else token[1]
 
 
-# shortcut: old palette names for views not yet redesigned, remove once all views use the tokens
-THEME = {
-    "bg_main": BG,
-    "surface": SURFACE,
-    "surface_card": SURFACE_2,
-    "surface_hover": BORDER,
-    "border": BORDER,
-    "border_light": BORDER,
-    "accent": ACCENT,
-    "accent_hover": ACCENT_HOVER,
-    "success": SUCCESS,
-    "success_hover": SUCCESS,
-    "danger": DANGER,
-    "danger_hover": DANGER,
-    "warning": WARNING,
-    "text_primary": TEXT,
-    "text_secondary": TEXT_MUTED,
-    "text_muted": TEXT_MUTED,
-}
-
-
 # ---------------------------------------------------------------------------
 # ttk.Treeview
 # ---------------------------------------------------------------------------
