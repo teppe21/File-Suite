@@ -82,6 +82,14 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
 
+      - name: GUI smoke start (Xvfb)
+        run: |
+          # timeout's exit code 124 means the window was still running after 5 s
+          set +e
+          xvfb-run -a timeout 5 python main.py
+          code=$?
+          if [ "$code" -ne 124 ]; then echo "main.py exited early with code $code"; exit 1; fi
+
   build:
     name: Build Standalone Executable
     needs: test
