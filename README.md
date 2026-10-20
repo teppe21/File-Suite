@@ -9,13 +9,13 @@
 File Suite is a desktop app that sorts the loose files in a folder into category subfolders and finds byte-identical duplicates by SHA-256. Every change is shown as a preview first, nothing happens until you confirm, existing files are never overwritten, and the last operation can be undone. It works only on files directly inside the chosen folder; subfolders, hidden files and symlinks are skipped.
 
 <p align="center">
-  <img src="docs/screenshots/organize.png" width="780" alt="Organize view: category rules and a preview of which files move where, including a rename" />
+  <img src="docs/screenshots/organize.png" width="780" alt="Organize view in dark mode: category rules and a preview of which files move where, including a rename" />
   <br/><br/>
-  <img src="docs/screenshots/duplicates.png" width="780" alt="Duplicates view: groups of identical files with the extra copies ticked for removal" />
+  <img src="docs/screenshots/duplicates.png" width="780" alt="Duplicates view in dark mode: groups of identical files with the extra copies ticked for removal" />
   <br/><br/>
-  <img src="docs/screenshots/activity.png" width="780" alt="Activity view: coloured log with a skipped file and the Undo button in the sidebar" />
+  <img src="docs/screenshots/activity.png" width="780" alt="Activity view in dark mode: coloured log with a skipped file and the Undo button in the toolbar" />
   <br/><br/>
-  <img src="docs/screenshots/duplicates-dark.png" width="780" alt="Duplicates view in dark mode" />
+  <img src="docs/screenshots/duplicates-light.png" width="780" alt="Duplicates view in light mode" />
 </p>
 
 ## What it does
