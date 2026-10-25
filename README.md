@@ -19,6 +19,16 @@ File Suite is a desktop app that sorts the loose files in a folder into category
   <img src="docs/screenshots/duplicates-dark.png" width="780" alt="Duplicates view in dark mode" />
 </p>
 
+On macOS:
+
+<p align="center">
+  <img src="docs/screenshots/macos-organize.png" width="780" alt="Organize view on macOS: a preview of which files move where, including a rename" />
+  <br/><br/>
+  <img src="docs/screenshots/macos-duplicates-dark.png" width="780" alt="Duplicates view on macOS in dark mode, with the Move to Trash button" />
+  <br/><br/>
+  <img src="docs/screenshots/macos-activity.png" width="780" alt="Activity view on macOS: log with a skipped file and the Undo button" />
+</p>
+
 ## What it does
 
 - **Organize Files**: previews which files move into which category folder, with file counts, total size and any renames, then moves them on confirmation.
@@ -98,7 +108,7 @@ Linux (X11 and Wayland) is the primary platform. Windows support is experimental
 
 Full list: [docs/SAFETY.md](docs/SAFETY.md#windows-specific-limitations).
 
-macOS support is experimental as well. It is tested through CI on macOS 15 and 26, and several things have not been tried on a real Mac yet. Main macOS caveats:
+macOS support is experimental as well, and AI assistance was used for the macOS port. It is tested through CI on macOS 15 and 26, and several things have not been tried on a real Mac yet. Main macOS caveats:
 
 - The app is not notarized, so macOS blocks the first launch: click **Done**, then choose **Open Anyway** under System Settings › Privacy & Security. Steps: [docs/SAFETY.md](docs/SAFETY.md#opening-the-macos-app-for-the-first-time).
 - macOS asks for permission the first time File Suite reads Downloads, Desktop, Documents, an external drive or a network volume.
