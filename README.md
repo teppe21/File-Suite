@@ -103,7 +103,7 @@ macOS: `packaging/macos/build.sh` creates `dist/FileSuite-macos-<arch>-v<version
 
 ## Platform notes
 
-Linux (X11 and Wayland) is the primary platform. Windows support is experimental and has been tested mainly through CI. Main Windows caveats:
+Linux (X11 and Wayland) is the primary platform. Windows support is in beta and has been tested mainly through CI. Main Windows caveats:
 
 - The executable is not code-signed, so SmartScreen may warn when you start it.
 - On USB sticks and network shares, deleted duplicates may be deleted permanently instead of going to the Recycle Bin; the app warns before this.
@@ -112,7 +112,7 @@ Linux (X11 and Wayland) is the primary platform. Windows support is experimental
 
 Full list: [docs/SAFETY.md](docs/SAFETY.md#windows-specific-limitations).
 
-macOS support is experimental as well, and AI assistance was used for the macOS port. It is tested through CI on macOS 15 and 26, and several things have not been tried on a real Mac yet. Main macOS caveats:
+macOS support is in beta as well, and AI assistance was used for the macOS port. It is tested through CI on macOS 15 and 26, and several things have not been tried on a real Mac yet. Main macOS caveats:
 
 - The app is not notarized, so macOS blocks the first launch: click **Done**, then choose **Open Anyway** under System Settings › Privacy & Security. Steps: [docs/SAFETY.md](docs/SAFETY.md#opening-the-macos-app-for-the-first-time).
 - macOS asks for permission the first time File Suite reads Downloads, Desktop, Documents, an external drive or a network volume.
