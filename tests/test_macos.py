@@ -466,6 +466,7 @@ class MacosTrashSeamTests(unittest.TestCase):
         seam.assert_not_called()
 
 
+@unittest.skipIf(sys.platform == "win32", "hard-link moves are the POSIX code path")
 class MacosMoveSeamTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
