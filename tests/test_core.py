@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 # Make `core` importable when running from the project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -73,6 +74,7 @@ class ValidateFolderNameTests(unittest.TestCase):
             self.assertEqual(cleaned, name)
 
     @unittest.skipIf(sys.platform == "win32", "Windows rejects : ? * and double quotes in folder names")
+    @patch("core.IS_MACOS", False)
     def test_symbols_in_names(self):
         # Colon, question mark, asterisk etc. are legal on Linux.
         for name in ["foo:bar", "foo?bar", "foo*bar", "a'b", 'a"b']:

@@ -76,7 +76,7 @@ class WindowsNameProblemTests(unittest.TestCase):
         with patch("core.IS_WINDOWS", True):
             self.assertFalse(validate_folder_name("foo:bar")[0])
             self.assertFalse(validate_folder_name("nul")[0])
-        with patch("core.IS_WINDOWS", False):
+        with patch("core.IS_WINDOWS", False), patch("core.IS_MACOS", False):
             self.assertEqual(validate_folder_name("foo:bar"), (True, "foo:bar"))
 
     def test_windows_categories(self):
@@ -91,7 +91,7 @@ class AttributeTests(unittest.TestCase):
                 self.assertTrue(is_hidden(Path(".env")))
 
     def test_hidden_on_linux_is_name_only(self):
-        with patch("platform_utils.IS_WINDOWS", False), patch("platform_utils.windows_attrs") as attrs:
+        with patch("platform_utils.IS_WINDOWS", False), patch("platform_utils.IS_MACOS", False), patch("platform_utils.windows_attrs") as attrs:
             self.assertFalse(is_hidden(Path("file.txt")))
             attrs.assert_not_called()
 
@@ -190,7 +190,7 @@ class OsErrorAndUiTests(unittest.TestCase):
             self.assertEqual(describe_os_error(self._exc(32)), "raw message")
 
     def test_labels(self):
-        with patch("platform_utils.IS_WINDOWS", False):
+        with patch("platform_utils.IS_WINDOWS", False), patch("platform_utils.IS_MACOS", False):
             self.assertEqual(platform_utils.mono_font(), "Monospace")
             self.assertEqual(platform_utils.trash_label(), "system trash")
         with patch("platform_utils.IS_WINDOWS", True):
