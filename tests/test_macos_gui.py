@@ -37,9 +37,68 @@ _RECORDED = (
     "trash_selected_duplicates",
 )
 
-# ANSI key codes
-KEY_O, KEY_Z, KEY_M, KEY_W, KEY_1, KEY_2, KEY_3 = 31, 6, 46, 13, 18, 19, 20
-KEY_RETURN, KEY_BACKSPACE, KEY_FORWARD_DELETE, KEY_PERIOD, KEY_A, KEY_ESCAPE = 36, 51, 117, 47, 0, 53
+def _letter_keycodes() -> dict[str, int]:
+    """
+    Key code of each unshifted character in the keyboard layout in use, or ``{}``
+    if it cannot be read. Tk 9 turns a key code into a keysym through the layout,
+    so a hard-coded US code types ``y`` instead of ``z`` on a Hungarian or German keyboard.
+    """
+    if not ON_MACOS:
+        return {}
+    import ctypes
+    import ctypes.util
+
+    try:
+        carbon = ctypes.CDLL(ctypes.util.find_library("Carbon"))
+        core = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+        carbon.TISCopyCurrentASCIICapableKeyboardLayoutInputSource.restype = ctypes.c_void_p
+        carbon.TISGetInputSourceProperty.restype = ctypes.c_void_p
+        carbon.TISGetInputSourceProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        carbon.LMGetKbdType.restype = ctypes.c_ubyte
+        carbon.UCKeyTranslate.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint16,
+            ctypes.c_uint16,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_uint16),
+        ]
+        core.CFDataGetBytePtr.restype = ctypes.c_void_p
+        core.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
+        source = carbon.TISCopyCurrentASCIICapableKeyboardLayoutInputSource()
+        data = carbon.TISGetInputSourceProperty(source, ctypes.c_void_p.in_dll(carbon, "kTISPropertyUnicodeKeyLayoutData"))
+        layout = core.CFDataGetBytePtr(data)
+        keyboard_type = carbon.LMGetKbdType()
+        codes: dict[str, int] = {}
+        for keycode in range(128):
+            dead_keys = ctypes.c_uint32(0)
+            length = ctypes.c_ulong(0)
+            chars = (ctypes.c_uint16 * 4)()
+            # Action 0 (key down), no modifiers, dead keys off (option bit 0).
+            status = carbon.UCKeyTranslate(layout, keycode, 0, 0, keyboard_type, 1, ctypes.byref(dead_keys), 4, ctypes.byref(length), chars)
+            if status == 0 and length.value == 1:
+                codes.setdefault(chr(chars[0]), keycode)
+        return codes
+    except (OSError, AttributeError, ValueError):
+        return {}
+
+
+_LAYOUT = _letter_keycodes()
+
+
+def _letter_key(char: str, ansi_code: int) -> int:
+    """The key that types ``char`` here; the US code if the layout is unknown."""
+    return _LAYOUT.get(char, ansi_code)
+
+
+# Letter keys follow the keyboard layout; the others are the same on every layout.
+KEY_O, KEY_Z, KEY_M, KEY_W, KEY_A = (_letter_key(c, code) for c, code in (("o", 31), ("z", 6), ("m", 46), ("w", 13), ("a", 0)))
+KEY_1, KEY_2, KEY_3 = 18, 19, 20
+KEY_RETURN, KEY_BACKSPACE, KEY_FORWARD_DELETE, KEY_PERIOD, KEY_ESCAPE = 36, 51, 117, 47, 53
 
 _state: dict = {}
 
