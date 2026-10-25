@@ -371,8 +371,10 @@ class FileOrganizerApp(ctk.CTk):
         # Only the command key on macOS: Ctrl chords there are Cocoa's Emacs-style text editing.
         mod = "Command" if IS_MACOS else "Control"
         for letter, action in (("o", self.select_folder), ("z", self.execute_undo), ("m", self._move_shortcut)):
-            key(f"<{mod}-{letter}>", action)
-            key(f"<{mod}-{letter.upper()}>", action)  # with Caps Lock on
+            # Cmd+M minimizes (and Tk would also run a binding for it), so macOS moves on Shift+Cmd+M.
+            shift = "Shift-" if IS_MACOS and letter == "m" else ""
+            key(f"<{mod}-{shift}{letter}>", action)
+            key(f"<{mod}-{shift}{letter.upper()}>", action)  # with Caps Lock on
         for number, view in (("1", "organize"), ("2", "duplicates"), ("3", "activity")):
             key(f"<{mod}-Key-{number}>", lambda v=view: self.show_view(v))
         key(f"<{mod}-Return>", self._run_shortcut)
@@ -389,7 +391,7 @@ class FileOrganizerApp(ctk.CTk):
             self.start_duplicate_scan()
 
     def _move_shortcut(self):
-        """Ctrl+M: the view's move button (organize moves; duplicates asks first)."""
+        """Ctrl+M (Shift+Cmd+M on macOS): the view's move button (organize moves; duplicates asks first)."""
         if self.current_view == "organize":
             self.organize.apply()
         elif self.current_view == "duplicates":

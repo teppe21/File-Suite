@@ -41,9 +41,9 @@ MACOS_TOOLTIPS = {
     "Undo  (⌘Z)",
     "Compare every file directly in this folder. Nothing changes.  (⌘↩)",
     f"Send the ticked copies to the {trash_label()}. This can't be undone from File Suite.  (⌘⌫)",
-    "Move the ticked copies into a “Duplicates” folder here. You can undo this.  (⌘M)",
+    "Move the ticked copies into a “Duplicates” folder here. You can undo this.  (⇧⌘M)",
     "Show what would move. Nothing changes yet.  (⌘↩)",
-    "Move the previewed files into their folders. You can undo this.  (⌘M)",
+    "Move the previewed files into their folders. You can undo this.  (⇧⌘M)",
 }
 
 # Window-wide sequences, in registration order, as on main.
@@ -60,7 +60,19 @@ MAIN_SEQUENCES = [
     "<Control-Return>",
     "<Control-KP_Enter>",
 ]
-MACOS_SEQUENCES = [seq.replace("Control", "Command") for seq in MAIN_SEQUENCES] + [
+# Shift+Cmd+M moves: Cmd+M is Minimize, which Tk also runs.
+MACOS_SEQUENCES = [
+    "<Command-o>",
+    "<Command-O>",
+    "<Command-z>",
+    "<Command-Z>",
+    "<Command-Shift-m>",
+    "<Command-Shift-M>",
+    "<Command-Key-1>",
+    "<Command-Key-2>",
+    "<Command-Key-3>",
+    "<Command-Return>",
+    "<Command-KP_Enter>",
     "<Command-w>",
     "<Command-W>",
 ]
@@ -121,6 +133,7 @@ class ShortcutTests(unittest.TestCase):
             self.assertEqual(shortcut("1"), "⌘1")
             self.assertEqual(shortcut("Enter"), "⌘↩")
             self.assertEqual(shortcut("Delete"), "⌘⌫")
+            self.assertEqual(shortcut("M"), "⇧⌘M")  # ⌘M minimizes the window
 
 
 class TooltipTextTests(unittest.TestCase):

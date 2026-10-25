@@ -10,8 +10,9 @@ from typing import NamedTuple
 from models import DuplicateGroup, ExecutionResult, OperationPlan
 from platform_utils import IS_MACOS
 
-# Glyphs macOS menus use for keys that are spelled out elsewhere.
-_MAC_KEY_GLYPHS = {"Enter": "↩", "Delete": "⌫"}
+# macOS spellings that are not just "⌘" plus the key. ⌘M is Minimize in every Mac
+# app's Window menu, which Tk runs in addition to a binding, so Move uses ⇧⌘M.
+_MAC_SHORTCUTS = {"M": "⇧⌘M", "Enter": "⌘↩", "Delete": "⌘⌫"}
 
 
 def shortcut(key: str) -> str:
@@ -20,9 +21,10 @@ def shortcut(key: str) -> str:
     ``shortcut("Enter")`` -> ``"Ctrl+Enter"``, and ``shortcut("Delete")`` -> the
     bare ``"Delete"``. On macOS the command key replaces Ctrl: ``"⌘O"``, ``"⌘↩"``,
     and ``"⌘⌫"`` for the trash key (Mac keyboards send BackSpace for "delete").
+    ``"M"`` (move) becomes ``"⇧⌘M"``.
     """
     if IS_MACOS:
-        return "⌘" + _MAC_KEY_GLYPHS.get(key, key)
+        return _MAC_SHORTCUTS.get(key, "⌘" + key)
     return key if key == "Delete" else f"Ctrl+{key}"
 
 
