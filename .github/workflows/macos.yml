@@ -76,12 +76,20 @@ jobs:
           if-no-files-found: warn
 
   build:
-    name: Build (macOS app bundle)
+    name: Build (macOS app bundle, ${{ matrix.arch }})
     needs: test
     # pip-audit is red on every platform until the Pillow pin moves (handoff N1),
     # which would skip this job; drop the condition once pip-audit is green again.
     if: ${{ !cancelled() }}
-    runs-on: macos-26
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
 
     steps:
       - name: Check out repository
@@ -98,6 +106,28 @@ jobs:
       - name: Verify checksum
         run: |
           python -c "import glob, hashlib, os, platform, version; f = glob.glob('dist/*.dmg')[0]; h, n = open(f + '.sha256').read().split(); assert n == os.path.basename(f) == f'FileSuite-macos-{platform.machine()}-v{version.__version__}.dmg'; assert h == hashlib.sha256(open(f, 'rb').read()).hexdigest(); print(n, 'OK')"
+
+      - name: Check release asset names
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # release.yml publishes dist/FileSuite-macos-*.dmg and its .sha256 and fails
+          # when a pattern matches nothing; hold this build to the same patterns.
+          status=0
+          patterns="$(sed -n 's|^ *\(dist/FileSuite-macos-[^ ]*\)$|\1|p' .github/workflows/release.yml)"
+          [ "$(printf '%s\n' "$patterns" | wc -l | tr -d ' ')" = 2 ] || { echo "release.yml should list two macOS file patterns" >&2; exit 1; }
+          while read -r pattern; do
+              matches=($pattern)
+              if [ "${#matches[@]}" -eq 1 ] && [ -f "${matches[0]}" ]; then
+                  echo "$pattern -> ${matches[0]}"
+              else
+                  echo "release.yml pattern '$pattern' matches: ${matches[*]}" >&2
+                  status=1
+              fi
+          done <<< "$patterns"
+          version="$(python -c "import version; print(version.__version__)")"
+          [ -f "dist/FileSuite-macos-$ARCH-v$version.dmg" ] || { echo "dist/FileSuite-macos-$ARCH-v$version.dmg is missing" >&2; status=1; }
+          exit "$status"
 
       - name: Check DMG contents
         run: |
@@ -133,15 +163,29 @@ jobs:
       - name: Upload bundle screenshot
         uses: actions/upload-artifact@v4
         with:
-          name: bundle-window-macos-26
+          name: bundle-window-${{ matrix.runner }}
           path: bundle-screenshot.png
           if-no-files-found: warn
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4
         with:
-          name: FileSuite-macos-arm64
+          name: FileSuite-macos-${{ matrix.arch }}
           path: |
             dist/*.dmg
             dist/*.dmg.sha256
           if-no-files-found: error
+
+      - name: Show Gatekeeper's verdict on a quarantined copy
+        timeout-minutes: 2
+        run: |
+          # Informational, never fails: this is what a user's Mac says about the
+          # ad-hoc signed, not notarized download. Works on a copy; nothing here
+          # clears quarantine on the build or for users.
+          copy="$(mktemp -d)/FileSuite.app"
+          ditto dist/FileSuite.app "$copy"
+          xattr -w com.apple.quarantine "0083;$(printf '%x' "$(date +%s)");Safari;" "$copy"
+          xattr -l "$copy"
+          spctl --status || true
+          codesign -dr - "$copy" || true
+          spctl --assess --type execute -vv "$copy" || echo "spctl exit code: $?"
