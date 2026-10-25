@@ -41,6 +41,11 @@ KEY_RETURN, KEY_BACKSPACE, KEY_FORWARD_DELETE, KEY_PERIOD, KEY_A = 36, 51, 117, 
 _state: dict = {}
 
 
+def _probe(message: str):
+    """Facts for the CI log; stderr, so a crash cannot swallow buffered output."""
+    print(message, file=sys.stderr, flush=True)
+
+
 def _fail_or_skip(message: str):
     """A CI runner always has a window server: missing one is a failure there."""
     if os.environ.get("CI"):
@@ -55,11 +60,6 @@ def setUpModule():
         import tkinter
     except ImportError as exc:
         _fail_or_skip(f"no Tk in this Python: {exc}")
-    try:
-        probe = tkinter.Tk()
-    except tkinter.TclError as exc:
-        _fail_or_skip(f"no window server: {exc}")
-    probe.destroy()
 
     # Imported only here, so the other platforms never need pyobjc or Tk.
     import AppKit
@@ -82,8 +82,14 @@ def setUpModule():
     for p in patches:
         p.start()
     printed = io.StringIO()
-    with contextlib.redirect_stdout(printed):
-        app = ui_app.FileOrganizerApp()
+    try:
+        # One Tk root per process: a second one after a destroyed first aborts on key events.
+        with contextlib.redirect_stdout(printed):
+            app = ui_app.FileOrganizerApp()
+    except tkinter.TclError as exc:
+        for p in patches:
+            p.stop()
+        _fail_or_skip(f"no window server: {exc}")
     app.update()
     _state.update(app=app, mocks=mocks, texts=texts, printed=printed.getvalue(), patches=patches, AppKit=AppKit)
 
@@ -212,15 +218,15 @@ class FontTests(unittest.TestCase):
         from ui import theme as t
 
         default = tkfont.nametofont("TkDefaultFont")
-        print(f"[probe] TkDefaultFont {default.actual()} linespace={default.metrics('linespace')}")
+        _probe(f"[probe] TkDefaultFont {default.actual()} linespace={default.metrics('linespace')}")
         for role in ("title", "section", "headline", "body", "caption", "caption_bold"):
             ctk_font = t.font(role)
             actual = ctk_font.actual()
-            print(f"[probe] font {role}: configured={ctk_font.cget('family')!r} {actual}")
+            _probe(f"[probe] font {role}: configured={ctk_font.cget('family')!r} {actual}")
             self.assertEqual(actual["family"], default.actual("family"), role)
         for role in ("body", "headline", "caption"):
             tree_font = t.tree_font(role)
-            print(f"[probe] tree {role}: {tree_font.actual()} linespace={tree_font.metrics('linespace')}")
+            _probe(f"[probe] tree {role}: {tree_font.actual()} linespace={tree_font.metrics('linespace')}")
             self.assertEqual(tree_font.actual("family"), default.actual("family"), role)
         self.assertEqual(t.font("headline").actual("weight"), "bold")
         self.assertEqual(t.font("body").actual("weight"), "normal")
@@ -232,7 +238,7 @@ class FontTests(unittest.TestCase):
 
         row = int(ttk.Style(_app()).lookup("Treeview", "rowheight"))
         line = t.tree_font("body").metrics("linespace")
-        print(f"[probe] rowheight={row} linespace={line} tk scaling={_app().tk.call('tk', 'scaling')}")
+        _probe(f"[probe] rowheight={row} linespace={line} tk scaling={_app().tk.call('tk', 'scaling')}")
         self.assertGreater(row, line)
 
 
@@ -275,7 +281,7 @@ class AppearanceTests(unittest.TestCase):
         while time.monotonic() < deadline and ctk.get_appearance_mode() != "Dark":
             _app().update()
             time.sleep(0.05)
-        print(f"[probe] after switching macOS to Dark: ctk mode={ctk.get_appearance_mode()} tree={self._surface()}")
+        _probe(f"[probe] after switching macOS to Dark: ctk mode={ctk.get_appearance_mode()} tree={self._surface()}")
         self.assertEqual(ctk.get_appearance_mode(), "Dark")
         self.assertEqual(self._surface(), t.SURFACE[1])
 
@@ -310,7 +316,7 @@ class ShortcutKeyTests(unittest.TestCase):
 
     def test_cmd_w_closes(self):
         press("w", KEY_W)
-        print(f"[probe] Cmd+W -> _on_closing called {calls('_on_closing')}x")
+        _probe(f"[probe] Cmd+W -> _on_closing called {calls('_on_closing')}x")
         self.assertGreaterEqual(calls("_on_closing"), 1)
 
     def test_cmd_m(self):
@@ -324,7 +330,7 @@ class ShortcutKeyTests(unittest.TestCase):
                 _state["AppKit"].NSDate.dateWithTimeIntervalSinceNow_(0.1)
             )
         minimized = window.isMiniaturized()
-        print(f"[probe] Cmd+M -> _move_shortcut called {calls('_move_shortcut')}x, window minimized={minimized}")
+        _probe(f"[probe] Cmd+M -> _move_shortcut called {calls('_move_shortcut')}x, window minimized={minimized}")
         if minimized:
             window.deminiaturize_(None)
             _app().update()
@@ -346,10 +352,10 @@ class ShortcutKeyTests(unittest.TestCase):
         field.delete(0, "end")
         field.insert(0, "abc")
         press("a", KEY_A, widget=field)
-        print(f"[probe] Cmd+A in entry -> selection_present={field.selection_present()}")
+        _probe(f"[probe] Cmd+A in entry -> selection_present={field.selection_present()}")
         self.assertTrue(field.selection_present())
         press("z", KEY_Z, widget=field)
-        print(f"[probe] Cmd+Z in entry -> execute_undo called {calls('execute_undo')}x, text={field.get()!r}")
+        _probe(f"[probe] Cmd+Z in entry -> execute_undo called {calls('execute_undo')}x, text={field.get()!r}")
 
 
 def _find_entry(widget):
@@ -389,7 +395,7 @@ class QuitTests(unittest.TestCase):
             print("RESULT closing=%s worker_cancelled=%s" % (app._is_closing, seen.wait(5)))
             """
         )
-        print(f"[probe] quit during scan: rc={result.returncode} out={result.stdout[-300:]!r} err={result.stderr[-300:]!r}")
+        _probe(f"[probe] quit during scan: rc={result.returncode} out={result.stdout[-300:]!r} err={result.stderr[-300:]!r}")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("RESULT closing=True worker_cancelled=True", result.stdout)
 
@@ -404,7 +410,7 @@ class QuitTests(unittest.TestCase):
             print("RESULT answer=%s closing=%s" % (answer, app._is_closing))
             """
         )
-        print(f"[probe] quit with dialog: rc={result.returncode} out={result.stdout[-300:]!r} err={result.stderr[-300:]!r}")
+        _probe(f"[probe] quit with dialog: rc={result.returncode} out={result.stdout[-300:]!r} err={result.stderr[-300:]!r}")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("RESULT answer=False closing=True", result.stdout)
         self.assertNotIn("Traceback", result.stderr)
