@@ -1,6 +1,6 @@
 # File Suite
 
-![Python](https://img.shields.io/badge/Python-3.10%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 ![Windows (beta)](https://img.shields.io/badge/Windows%20%28beta%29-0078D4?style=for-the-badge&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEgMy41bDkuNS0xLjN2OUgxek0xMS43IDJsMTEuMy0xLjZ2MTAuOEgxMS43ek0xIDEyLjRoOS41djlsLTkuNS0xLjN6TTExLjcgMTIuNEgyM3YxMC44TDExLjcgMjEuNnoiLz48L3N2Zz4%3D)
 ![macOS (beta)](https://img.shields.io/badge/macOS%20%28beta%29-6E6E73?style=for-the-badge&logo=apple&logoColor=white)
@@ -51,7 +51,7 @@ Details: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Install and run
 
-**Requirements**: Python 3.10 to 3.13 with Tk (on Linux, the `python3-tk` package). On Linux, `zenity` or `kdialog` is used for the folder picker if installed. Windows needs Windows 10 22H2 or newer, x64. macOS needs macOS 15 or newer on Apple silicon or Intel, and Python with Tk 8.6 from the python.org installer or from Homebrew (`python-tk@3.x`).
+**Requirements**: Python 3.11 to 3.13 with Tk (on Linux, the `python3-tk` package). On Linux, `zenity` or `kdialog` is used for the folder picker if installed. Windows needs Windows 10 22H2 or newer, x64. macOS needs macOS 15 or newer on Apple silicon or Intel, and Python with Tk 8.6 from the python.org installer or from Homebrew (`python-tk@3.x`).
 
 ### Run from source
 

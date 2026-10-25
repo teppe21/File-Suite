@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Moves that need the copy fallback (another volume, FAT/exFAT) do not carry extended attributes or Finder tags.
   - Command-key shortcuts: ⌘O, ⌘1/2/3, ⌘↩, ⇧⌘M (Move; ⌘M stays Minimize), ⌘Z, ⌘⌫ in the Duplicates list, ⌘. closes dialogs, ⌘W and ⌘Q close the app. `.dmg`, `.pkg` and `.command` files are sorted into "Installers & Code", and the log uses Menlo.
 - **macOS Packaging**: `packaging/macos/build.sh` builds `FileSuite.app` with PyInstaller and writes `FileSuite-macos-<arch>-v<version>.dmg` (`arm64` or `x86_64`, the architecture of the build machine) with a SHA-256 checksum file. The app is signed ad hoc and not notarized, so macOS blocks the first launch; the steps are in `docs/SAFETY.md`.
-- **macOS CI**: `macos.yml` runs the test suite on macOS 15 and 26 with Python 3.10-3.13 and builds the app and DMG for Apple silicon and Intel; the DMGs are uploaded as workflow artifacts.
+- **macOS CI**: `macos.yml` runs the test suite on macOS 15 and 26 with Python 3.11-3.13 and builds the app and DMG for Apple silicon and Intel; the DMGs are uploaded as workflow artifacts.
 - **macOS Release Assets**: `release.yml` builds both DMGs and attaches them and their `.sha256` files to the GitHub Release (not yet run for a real release). The Intel DMG depends on GitHub's Intel macOS runner, which GitHub has announced it will stop offering after the macOS 15 runner image is retired (Fall 2027); it cannot be built after that.
 - macOS-specific and cross-platform unit tests (`test_macos.py`, `test_ui_macos.py`, `test_macos_gui.py`, `test_macos_bundle.py`).
 
@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Activity: warnings and errors are coloured, can be filtered, copied or saved, and a counter on the sidebar shows new ones.
   - Results appear as messages inside the view instead of pop-ups; confirmations list the file count, size, destination and whether the action can be undone, including the permanent-delete warning for drives without a Recycle Bin.
   - Keyboard shortcuts: Ctrl+O, Ctrl+1/2/3, Ctrl+Enter, Ctrl+M, Ctrl+Z, Space, Delete, Esc.
+
+### Removed
+- Python 3.10 support, because Pillow 13 requires Python 3.11 or newer. Supported versions are now 3.11 to 3.13.
+
+### Security
+- Pillow raised to 13.0.0, which fixes the advisories `pip-audit` reports for 12.3.0.
 
 ---
 
