@@ -261,6 +261,25 @@ def trash_windows(path: Path) -> tuple[bool, str | None]:
     return True, None
 
 
+def trash_macos(path: Path) -> tuple[bool, str | None]:
+    """
+    Send ``path`` to the Finder Trash, where Put Back works. On a volume
+    without a Trash this fails and leaves the file in place.
+    """
+    try:
+        from Foundation import NSURL, NSFileManager
+    except ImportError as exc:
+        return False, f"Failed to trash '{path.name}': {exc}"
+
+    url = NSURL.fileURLWithPath_(str(path))
+    manager = NSFileManager.defaultManager()
+    ok, _, error = manager.trashItemAtURL_resultingItemURL_error_(url, None, None)
+    if not ok:
+        # localizedFailureReason() is often None; the description never is.
+        return False, f"Failed to trash '{path.name}': {error.localizedDescription()}"
+    return True, None
+
+
 def windows_drive_type(root: str) -> int:
     """Return the ``GetDriveTypeW`` result for the drive root ``root``."""
     import ctypes
@@ -278,6 +297,7 @@ def trash_may_be_permanent(path: Path) -> bool:
     network shares) there may be no Recycle Bin. Always False off Windows.
     A missing drive root or a failed lookup counts as True.
     """
+    # macOS: trashItemAtURL fails instead of deleting where there is no Trash.
     if not IS_WINDOWS:
         return False
     drive = os.path.splitdrive(os.path.abspath(path))[0]

@@ -37,6 +37,7 @@ from platform_utils import (
     is_link_like,
     move_file,
     new_reserved_set,
+    trash_macos,
     trash_windows,
 )
 
@@ -471,7 +472,8 @@ def move_to_system_trash(
     default ~/.local/share/Trash).
 
     Creates compliant .trashinfo metadata. Cleans up orphaned metadata
-    if moving the file fails.
+    if moving the file fails. Without ``trash_dir``, Windows uses the
+    Recycle Bin and macOS the Finder Trash instead.
     Returns (success: bool, error_message: str | None).
     """
     if not file_path.exists():
@@ -485,6 +487,9 @@ def move_to_system_trash(
 
     if trash_dir is None and IS_WINDOWS:
         return trash_windows(file_path)
+
+    if trash_dir is None and IS_MACOS:
+        return trash_macos(file_path)
 
     if trash_dir is None:
         # FreeDesktop spec: $XDG_DATA_HOME if set to an absolute path, else ~/.local/share
