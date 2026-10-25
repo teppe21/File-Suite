@@ -127,6 +127,10 @@ class FileOrganizerApp(ctk.CTk):
                 print(f"[WARNING] Could not load window icon: {exc}")
             return
 
+        if IS_MACOS and getattr(sys, "frozen", False):
+            # iconphoto would replace the .app's Dock icon with this unpadded square.
+            return
+
         icon_path = _resource_path("organizer.jpg")
         if not icon_path.exists():
             return
