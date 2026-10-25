@@ -118,10 +118,11 @@ def _window():
 
 
 def _activate():
-    """Make the Tk window the key window of the foreground app."""
-    appkit = _state["AppKit"]
-    appkit.NSApp.activateIgnoringOtherApps_(True)
-    _window().makeKeyAndOrderFront_(None)
+    """
+    Bring the app to the front through Tk. AppKit calls that make Tk run Python
+    callbacks (such as ``makeKeyAndOrderFront_``) abort the interpreter from here.
+    """
+    _state["AppKit"].NSApp.activateIgnoringOtherApps_(True)
     _app().lift()
     _app().focus_force()
     _app().update()
@@ -326,19 +327,14 @@ class ShortcutKeyTests(unittest.TestCase):
 
     def test_z_cmd_m_is_the_minimize_key(self):
         """Runs last of the key tests: it minimizes the window."""
-        window = _window()
         press("m", KEY_M)
         deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and not window.isMiniaturized():
+        while time.monotonic() < deadline and _app().state() != "iconic":
             _app().update()
             time.sleep(0.05)
-        minimized = window.isMiniaturized()
-        _probe(f"[probe] Cmd+M -> _move_shortcut called {calls('_move_shortcut')}x, window minimized={minimized}")
-        window.deminiaturize_(None)
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and window.isMiniaturized():
-            _app().update()
-            time.sleep(0.05)
+        _probe(f"[probe] Cmd+M -> _move_shortcut called {calls('_move_shortcut')}x, window state={_app().state()}")
+        _app().deiconify()
+        _app().update()
 
     def test_delete_keys_trash_in_the_duplicates_list(self):
         _app().show_view("duplicates")
