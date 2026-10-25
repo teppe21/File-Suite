@@ -35,6 +35,7 @@ from platform_utils import (
     is_hidden,
     is_link_like,
     move_file,
+    new_reserved_set,
     trash_windows,
 )
 
@@ -69,7 +70,7 @@ def build_organization_plan(
         validated_custom_dest = res  # type: ignore[assignment]
 
     plan = OperationPlan(target_dir=target_dir)
-    planned_destinations: set[Path] = set()
+    planned_destinations = new_reserved_set()
 
     try:
         entries = list(target_dir.iterdir())
@@ -255,7 +256,7 @@ def execute_operation_plan(
     total = len(items_to_exec)
 
     # Track destinations used during this execution to prevent collisions within batch
-    allocated_destinations: set[Path] = set()
+    allocated_destinations = new_reserved_set()
 
     for idx, item in enumerate(items_to_exec, 1):
         if on_progress:
@@ -613,7 +614,7 @@ def build_duplicate_move_plan(
     dup_folder_resolved = dup_folder.resolve(strict=False)
 
     plan = OperationPlan(target_dir=target_dir)
-    planned_destinations: set[Path] = set()
+    planned_destinations = new_reserved_set()
 
     for f in duplicates:
         skip_reason: str | None = None

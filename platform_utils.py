@@ -14,9 +14,11 @@ import os
 import shutil
 import stat
 import sys
+import unicodedata
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 
 # Windows file attribute bits and reparse tags, defined here because the
 # ``stat`` module only exposes them on Windows (and not all of them).
@@ -28,6 +30,10 @@ FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
 IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 IO_REPARSE_TAG_SYMLINK = 0xA000000C
 DRIVE_FIXED = 3  # GetDriveTypeW result for a local fixed disk
+
+# BSD file flags (``st_flags``). ``SF_DATALESS`` marks an iCloud placeholder
+# whose content is not on disk; the ``stat`` module lacks it before Python 3.13.
+SF_DATALESS = 0x40000000
 
 _CLOUD_PLACEHOLDER_ATTRS = (
     FILE_ATTRIBUTE_OFFLINE
@@ -64,13 +70,24 @@ def windows_attrs(path: Path) -> int | None:
         return None
 
 
+def macos_flags(path: Path) -> int:
+    """Return the BSD file flags of ``path`` (not following links), 0 if unknown."""
+    try:
+        return getattr(path.lstat(), "st_flags", 0)
+    except OSError:
+        return 0
+
+
 def is_hidden(path: Path) -> bool:
     """
     Return True for dot-files and, on Windows, for files marked hidden or
-    system. Unreadable attributes on Windows count as hidden.
+    system. Unreadable attributes on Windows count as hidden. On macOS the
+    Finder "hidden" flag counts too.
     """
     if path.name.startswith("."):
         return True
+    if IS_MACOS and not IS_WINDOWS:
+        return bool(macos_flags(path) & stat.UF_HIDDEN)
     if not IS_WINDOWS:
         return False
     attrs = windows_attrs(path)
@@ -99,7 +116,9 @@ def is_link_like(path: Path) -> bool:
 
 
 def is_cloud_placeholder(path: Path) -> bool:
-    """Return True for Windows cloud files whose content is not on disk."""
+    """Return True for Windows or iCloud files whose content is not on disk."""
+    if IS_MACOS and not IS_WINDOWS:
+        return bool(macos_flags(path) & SF_DATALESS)
     attrs = windows_attrs(path)
     return attrs is not None and bool(attrs & _CLOUD_PLACEHOLDER_ATTRS)
 
@@ -127,6 +146,44 @@ def windows_name_problem(name: str) -> str | None:
         return f"'{device}' is a reserved device name on Windows."
 
     return None
+
+
+def macos_name_problem(name: str) -> str | None:
+    """Return why ``name`` is not a good macOS folder name, or None."""
+    # POSIX accepts ":" but Finder shows it as "/" (and the reverse).
+    if ":" in name:
+        return "Folder name cannot contain ':' on macOS (Finder shows it as '/')."
+    return None
+
+
+def collision_key(path: Path) -> Path:
+    """
+    Return ``path`` normalized the way the filesystem compares names: on
+    macOS APFS ignores case and Unicode normalization (NFC vs NFD), elsewhere
+    the path is returned unchanged.
+    """
+    if not IS_MACOS:
+        return path
+    decomposed = unicodedata.normalize("NFD", str(path))
+    return Path(unicodedata.normalize("NFD", decomposed.casefold()))
+
+
+class _FoldedPathSet(set):
+    """Set of paths that treats names the filesystem sees as equal as one."""
+
+    def add(self, path: Path) -> None:
+        super().add(collision_key(path))
+
+    def __contains__(self, path: object) -> bool:
+        return isinstance(path, Path) and super().__contains__(collision_key(path))
+
+
+def new_reserved_set() -> set[Path]:
+    """
+    Return an empty set for planned destinations. A plain ``set`` except on
+    macOS, where ``A.txt`` and ``a.txt`` (or NFC/NFD spellings) are one name.
+    """
+    return _FoldedPathSet() if IS_MACOS else set()
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +293,13 @@ def describe_os_error(exc: OSError) -> str:
         winerror = getattr(exc, "winerror", None)
         if winerror in messages:
             return messages[winerror]
+    elif IS_MACOS and exc.errno in (errno.EPERM, errno.EACCES):
+        if exc.filename and macos_flags(Path(os.fsdecode(exc.filename))) & stat.UF_IMMUTABLE:
+            return "The file is locked in Finder (uncheck 'Locked' in Get Info)."
+        return (
+            "Permission denied. Check the file's permissions, or allow File Suite "
+            "access to this folder in System Settings > Privacy & Security."
+        )
     return str(exc)
 
 
@@ -245,9 +309,13 @@ def describe_os_error(exc: OSError) -> str:
 
 def mono_font() -> str:
     """Return the monospace font family name for the log view."""
-    return "Consolas" if IS_WINDOWS else "Monospace"
+    if IS_WINDOWS:
+        return "Consolas"
+    return "Menlo" if IS_MACOS else "Monospace"
 
 
 def trash_label() -> str:
     """Return the user-facing name of the system trash."""
-    return "Recycle Bin" if IS_WINDOWS else "system trash"
+    if IS_WINDOWS:
+        return "Recycle Bin"
+    return "Trash" if IS_MACOS else "system trash"

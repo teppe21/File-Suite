@@ -8,7 +8,13 @@ so it can be unit-tested without launching a window.
 import re
 from pathlib import Path
 
-from platform_utils import IS_WINDOWS, windows_name_problem
+from platform_utils import (
+    IS_MACOS,
+    IS_WINDOWS,
+    macos_name_problem,
+    new_reserved_set,
+    windows_name_problem,
+)
 
 # ---------------------------------------------------------------------------
 # File categories
@@ -40,6 +46,9 @@ CATEGORIES: dict[str, set[str]] = {
 
 if IS_WINDOWS:
     CATEGORIES["Installers & Code"] |= {".exe", ".msi", ".msix", ".bat", ".cmd", ".ps1"}
+
+if IS_MACOS:
+    CATEGORIES["Installers & Code"] |= {".dmg", ".pkg", ".command"}
 
 # Extensions that consist of more than one dot-separated component.
 # Used for collision-renaming so `backup.tar.gz` becomes `backup_1.tar.gz`
@@ -78,7 +87,8 @@ def validate_folder_name(name: str) -> tuple[bool, str]:
 
     Everything else is accepted, since Linux filesystems support arbitrary
     UTF-8 names. On Windows, names that Windows cannot create are also
-    rejected (see ``platform_utils.windows_name_problem``).
+    rejected (see ``platform_utils.windows_name_problem``); on macOS names
+    containing ``:`` are rejected.
     """
     if name is None:
         return False, "Folder name is required."
@@ -104,6 +114,10 @@ def validate_folder_name(name: str) -> tuple[bool, str]:
 
     if IS_WINDOWS:
         problem = windows_name_problem(cleaned)
+        if problem:
+            return False, problem
+    elif IS_MACOS:
+        problem = macos_name_problem(cleaned)
         if problem:
             return False, problem
 
@@ -247,7 +261,7 @@ def build_collision_safe_path(
         photo.jpg       -> photo_1.jpg
         file            -> file_1
     """
-    reserved = reserved or set()
+    reserved = new_reserved_set() if reserved is None else reserved
 
     def taken(candidate: Path) -> bool:
         return candidate.exists() or candidate.is_symlink() or candidate in reserved
