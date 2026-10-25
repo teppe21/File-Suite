@@ -39,6 +39,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run unit tests
+        env:
+          FILESUITE_REAL_TRASH_TEST: "1"
         run: |
           python -m unittest discover -s tests -v
 
