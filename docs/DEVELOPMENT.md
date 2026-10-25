@@ -93,8 +93,8 @@ Windows-only and Linux-only tests are skipped on the other platform. Ruff and Ba
 
 ## Continuous integration
 
-- **`tests.yml`** (push and pull request to `main`, `ubuntu-24.04`): Ruff; Bandit and pip-audit; unit tests on Python 3.10, 3.11, 3.12 and 3.13, each followed by a 5-second GUI start under Xvfb; then builds the Linux binary with `build.sh`, verifies its SHA-256 checksum and uploads it as the artifact `FileSuite-linux-x86_64`.
-- **`windows.yml`** (push and pull request to `main`, `windows-2025`): unit tests on Python 3.10 to 3.13 and pip-audit on 3.12; then builds the bundle with `packaging/windows/build.ps1`, verifies the checksum and bundle contents, runs a 5-second start-up smoke test and uploads the artifact `FileSuite-windows-x64`.
+- **`tests.yml`** (push and pull request to `main`, `ubuntu-24.04`): Ruff; Bandit and pip-audit; unit tests on Python 3.11, 3.12 and 3.13, each followed by a 5-second GUI start under Xvfb; then builds the Linux binary with `build.sh`, verifies its SHA-256 checksum and uploads it as the artifact `FileSuite-linux-x86_64`.
+- **`windows.yml`** (push and pull request to `main`, `windows-2025`): unit tests on Python 3.11 to 3.13 and pip-audit on 3.12; then builds the bundle with `packaging/windows/build.ps1`, verifies the checksum and bundle contents, runs a 5-second start-up smoke test and uploads the artifact `FileSuite-windows-x64`.
 - **`release.yml`** (tag `v*`): see below.
 
 ## Release process
