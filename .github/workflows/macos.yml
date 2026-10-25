@@ -74,3 +74,74 @@ jobs:
           name: window-${{ matrix.os }}
           path: screenshot.png
           if-no-files-found: warn
+
+  build:
+    name: Build (macOS app bundle)
+    needs: test
+    # pip-audit is red on every platform until the Pillow pin moves (handoff N1),
+    # which would skip this job; drop the condition once pip-audit is green again.
+    if: ${{ !cancelled() }}
+    runs-on: macos-26
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build bundle
+        run: ./packaging/macos/build.sh
+
+      - name: Verify checksum
+        run: |
+          python -c "import glob, hashlib, os, platform, version; f = glob.glob('dist/*.dmg')[0]; h, n = open(f + '.sha256').read().split(); assert n == os.path.basename(f) == f'FileSuite-macos-{platform.machine()}-v{version.__version__}.dmg'; assert h == hashlib.sha256(open(f, 'rb').read()).hexdigest(); print(n, 'OK')"
+
+      - name: Check DMG contents
+        run: |
+          mnt="$(mktemp -d)"
+          hdiutil attach dist/*.dmg -readonly -nobrowse -mountpoint "$mnt"
+          status=0
+          ls -la "$mnt"
+          [ -x "$mnt/FileSuite.app/Contents/MacOS/FileSuite" ] || { echo "FileSuite.app is missing from the DMG" >&2; status=1; }
+          [ "$(readlink "$mnt/Applications")" = "/Applications" ] || { echo "Applications link is missing from the DMG" >&2; status=1; }
+          codesign --verify --deep --strict --verbose=2 "$mnt/FileSuite.app" || status=1
+          hdiutil detach "$mnt" || { sleep 3; hdiutil detach -force "$mnt"; }
+          exit "$status"
+
+      - name: Smoke test
+        run: |
+          dist/FileSuite.app/Contents/MacOS/FileSuite > smoke.log 2>&1 &
+          pid=$!
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "FileSuite exited within 5 seconds" >&2
+            cat smoke.log
+            exit 1
+          fi
+          screencapture -x bundle-screenshot.png || echo "screencapture failed" >&2
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          cat smoke.log
+          if grep -q "Could not load window icon" smoke.log; then
+            echo "The bundle could not load its window icon" >&2
+            exit 1
+          fi
+
+      - name: Upload bundle screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-window-macos-26
+          path: bundle-screenshot.png
+          if-no-files-found: warn
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileSuite-macos-arm64
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
