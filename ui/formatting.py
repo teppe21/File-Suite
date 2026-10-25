@@ -8,6 +8,22 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from models import DuplicateGroup, ExecutionResult, OperationPlan
+from platform_utils import IS_MACOS
+
+# Glyphs macOS menus use for keys that are spelled out elsewhere.
+_MAC_KEY_GLYPHS = {"Enter": "↩", "Delete": "⌫"}
+
+
+def shortcut(key: str) -> str:
+    """
+    A shortcut as shown in tooltips: ``shortcut("O")`` -> ``"Ctrl+O"``,
+    ``shortcut("Enter")`` -> ``"Ctrl+Enter"``, and ``shortcut("Delete")`` -> the
+    bare ``"Delete"``. On macOS the command key replaces Ctrl: ``"⌘O"``, ``"⌘↩"``,
+    and ``"⌘⌫"`` for the trash key (Mac keyboards send BackSpace for "delete").
+    """
+    if IS_MACOS:
+        return "⌘" + _MAC_KEY_GLYPHS.get(key, key)
+    return key if key == "Delete" else f"Ctrl+{key}"
 
 
 def format_size(num_bytes: int) -> str:

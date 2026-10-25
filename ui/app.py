@@ -34,7 +34,7 @@ from operations import (
     move_to_system_trash,
     undo_last_operation,
 )
-from platform_utils import IS_WINDOWS, trash_label, trash_may_be_permanent
+from platform_utils import IS_MACOS, IS_WINDOWS, trash_label, trash_may_be_permanent
 from ui import theme as t
 from ui.activity_view import ActivityView
 from ui.duplicates_view import DuplicatesView, group_label
@@ -42,6 +42,7 @@ from ui.formatting import (
     format_log_line,
     format_size,
     plural,
+    shortcut,
     truncate_middle,
     undo_label,
 )
@@ -100,6 +101,9 @@ class FileOrganizerApp(ctk.CTk):
         self.current_view = ""
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        if IS_MACOS:
+            # Cmd+Q and the app menu's Quit call this Tcl command, not WM_DELETE_WINDOW.
+            self.createcommand("tk::mac::Quit", self._on_closing)
 
         t.apply_treeview_style(self)
         self._build_layout()
@@ -136,6 +140,8 @@ class FileOrganizerApp(ctk.CTk):
 
     def _on_closing(self):
         """Handle window close gracefully, terminating worker threads cooperatively."""
+        if self._is_closing:  # Cmd+W can arrive as both a key and the Close menu item
+            return
         self._is_closing = True
         self._cancel_scan.set()
         ctk.AppearanceModeTracker.remove(self._on_appearance_change)
@@ -237,7 +243,7 @@ class FileOrganizerApp(ctk.CTk):
         tooltip(self.folder_path_label, lambda: str(self.current_path))
         change = secondary_button(folder, "Change…", self.select_folder, small=True, fg_color=t.SURFACE)
         change.grid(row=2, column=0, pady=(8, 0), sticky="w")
-        tooltip(change, "Choose another folder  (Ctrl+O)")
+        tooltip(change, f"Choose another folder  ({shortcut('O')})")
         self._show_folder()
 
         ctk.CTkLabel(bar, text="Tools", font=t.font("caption_bold"), text_color=t.TEXT_MUTED, anchor="w").grid(
@@ -263,7 +269,7 @@ class FileOrganizerApp(ctk.CTk):
                 command=lambda k=key: self.show_view(k),
             )
             button.grid(row=idx, column=0, pady=1, sticky="ew")
-            tooltip(button, f"Ctrl+{idx + 1}")
+            tooltip(button, shortcut(str(idx + 1)))
             self.nav_buttons[key] = button
         # Count of new warnings/errors, like an unread badge
         self.activity_badge = ctk.CTkLabel(
@@ -362,13 +368,18 @@ class FileOrganizerApp(ctk.CTk):
 
             self.bind(sequence, handler)
 
+        # Only the command key on macOS: Ctrl chords there are Cocoa's Emacs-style text editing.
+        mod = "Command" if IS_MACOS else "Control"
         for letter, action in (("o", self.select_folder), ("z", self.execute_undo), ("m", self._move_shortcut)):
-            key(f"<Control-{letter}>", action)
-            key(f"<Control-{letter.upper()}>", action)  # with Caps Lock on
+            key(f"<{mod}-{letter}>", action)
+            key(f"<{mod}-{letter.upper()}>", action)  # with Caps Lock on
         for number, view in (("1", "organize"), ("2", "duplicates"), ("3", "activity")):
-            key(f"<Control-Key-{number}>", lambda v=view: self.show_view(v))
-        key("<Control-Return>", self._run_shortcut)
-        key("<Control-KP_Enter>", self._run_shortcut)
+            key(f"<{mod}-Key-{number}>", lambda v=view: self.show_view(v))
+        key(f"<{mod}-Return>", self._run_shortcut)
+        key(f"<{mod}-KP_Enter>", self._run_shortcut)
+        if IS_MACOS:
+            key("<Command-w>", self._on_closing)
+            key("<Command-W>", self._on_closing)
 
     def _run_shortcut(self):
         """Ctrl+Enter: preview in Organize, scan in Duplicates."""
@@ -425,7 +436,7 @@ class FileOrganizerApp(ctk.CTk):
         res = self.last_execution_result
         if not (res and res.success_count > 0):
             return "Nothing to undo"
-        return f"{undo_label(res)}  (Ctrl+Z)"
+        return f"{undo_label(res)}  ({shortcut('Z')})"
 
     def apply_plan(self, plan: OperationPlan) -> ExecutionResult | None:
         """Execute a previewed organization plan; the view reports the result. None if nothing ran."""

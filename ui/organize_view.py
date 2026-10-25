@@ -10,7 +10,13 @@ from core import CATEGORIES, collect_selected_extensions
 from models import ExecutionResult, OperationItem, OperationPlan
 from operations import build_organization_plan
 from ui import theme as t
-from ui.formatting import category_counts, extension_preview, format_size, plural
+from ui.formatting import (
+    category_counts,
+    extension_preview,
+    format_size,
+    plural,
+    shortcut,
+)
 from ui.widgets import (
     Banner,
     Card,
@@ -128,7 +134,7 @@ class OrganizeView(ctk.CTkFrame):
 
         self.preview_button = primary_button(inputs, "Preview", self.generate_preview, width=96)
         self.preview_button.grid(row=1, column=2, sticky="e")
-        tooltip(self.preview_button, "Show what would move. Nothing changes yet.  (Ctrl+Enter)")
+        tooltip(self.preview_button, f"Show what would move. Nothing changes yet.  ({shortcut('Enter')})")
         return card
 
     def _build_preview(self) -> Card:
@@ -168,7 +174,10 @@ class OrganizeView(ctk.CTkFrame):
         footer = ctk.CTkFrame(self, fg_color="transparent")
         self.move_button = primary_button(footer, "Move Files", self.apply, width=120)
         self.move_button.pack(side="right")
-        tooltip(self.move_button, "Move the previewed files into their folders. You can undo this.  (Ctrl+M)")
+        tooltip(
+            self.move_button,
+            f"Move the previewed files into their folders. You can undo this.  ({shortcut('M')})",
+        )
         self.discard_button = secondary_button(footer, "Discard Preview", self.clear_preview)
         self.discard_button.pack(side="right", padx=(0, t.SPACE))
         return footer
