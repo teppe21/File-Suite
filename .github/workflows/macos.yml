@@ -38,15 +38,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s tests -v
+
       - name: Run pip-audit vulnerability scan
         if: matrix.python-version == '3.12'
         run: |
           pip install pip-audit
           pip-audit -r requirements.txt
-
-      - name: Run unit tests
-        run: |
-          python -m unittest discover -s tests -v
 
       - name: Smoke test
         run: |
