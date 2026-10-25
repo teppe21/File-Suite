@@ -6,6 +6,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
+from platform_utils import IS_MACOS
 from ui import theme as t
 
 # ---------------------------------------------------------------------------
@@ -422,10 +423,15 @@ def confirm_dialog(
         return "break"
 
     dialog.bind("<Escape>", lambda _e: finish(False))
+    if IS_MACOS:
+        dialog.bind("<Command-period>", lambda _e: finish(False))
     for key in ("<Return>", "<KP_Enter>", "<space>"):
         dialog.bind(key, lambda _e: order[focus[0]].invoke())
     for key in ("<Tab>", "<Shift-Tab>", "<ISO_Left_Tab>", "<Left>", "<Right>"):
-        dialog.bind(key, move_focus)
+        try:
+            dialog.bind(key, move_focus)
+        except tk.TclError:  # Tk 8.6.12 on macOS does not know the ISO_Left_Tab keysym
+            pass
     dialog.protocol("WM_DELETE_WINDOW", lambda: finish(False))
     show_focus()
 
@@ -440,6 +446,9 @@ def confirm_dialog(
     dialog.focus_force()
     parent.wait_window(dialog)
     # Give keyboard focus back (e.g. to the duplicates tree) so shortcuts keep working.
-    target = previous_focus if previous_focus is not None and previous_focus.winfo_exists() else parent
-    target.focus_force()
+    try:
+        target = previous_focus if previous_focus is not None and previous_focus.winfo_exists() else parent
+        target.focus_force()
+    except tk.TclError:  # Cmd+Q destroyed the app while the dialog was open: nothing was confirmed
+        pass
     return confirmed

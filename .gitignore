@@ -16,6 +16,7 @@ build/
 dist/
 *.spec
 !packaging/windows/FileSuite.spec
+!packaging/macos/FileSuite.spec
 
 # Editors / OS
 .vscode/

@@ -532,7 +532,7 @@ class SystemTrashTests(unittest.TestCase):
         f = self.target / "x.txt"
         f.write_text("data")
         xdg = self.target / "xdg"
-        with patch("operations.IS_WINDOWS", False), patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg)}):
+        with patch("operations.IS_WINDOWS", False), patch("operations.IS_MACOS", False), patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg)}):
             ok, err = move_to_system_trash(f)
         self.assertTrue(ok, err)
         self.assertTrue((xdg / "Trash" / "files" / "x.txt").exists())
@@ -542,7 +542,7 @@ class SystemTrashTests(unittest.TestCase):
         f = self.target / "x.txt"
         f.write_text("data")
         home = self.target / "home"
-        with patch("operations.IS_WINDOWS", False), patch.dict(
+        with patch("operations.IS_WINDOWS", False), patch("operations.IS_MACOS", False), patch.dict(
             os.environ, {"XDG_DATA_HOME": "relative/path"}
         ), patch("operations.Path.home", return_value=home):
             ok, err = move_to_system_trash(f)

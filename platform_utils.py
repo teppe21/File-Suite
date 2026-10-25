@@ -2,8 +2,8 @@
 Platform-specific helpers for File Suite.
 
 Every function keeps the existing Linux behavior on non-Windows systems and
-adds the Windows equivalent behind ``IS_WINDOWS``. This module must not
-import any other project module.
+adds the Windows equivalent behind ``IS_WINDOWS``; macOS equivalents sit
+behind ``IS_MACOS``. This module must not import any other project module.
 """
 
 from __future__ import annotations
@@ -14,9 +14,11 @@ import os
 import shutil
 import stat
 import sys
+import unicodedata
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 
 # Windows file attribute bits and reparse tags, defined here because the
 # ``stat`` module only exposes them on Windows (and not all of them).
@@ -28,6 +30,12 @@ FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000
 IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 IO_REPARSE_TAG_SYMLINK = 0xA000000C
 DRIVE_FIXED = 3  # GetDriveTypeW result for a local fixed disk
+
+# macOS file flags (``st_flags``), defined here because the ``stat`` module
+# lacks ``SF_DATALESS`` before Python 3.13. Values from Apple's xnu
+# bsd/sys/stat.h (github.com/apple-oss-distributions/xnu, and the macOS SDK).
+UF_HIDDEN = 0x8000  # hidden in Finder
+SF_DATALESS = 0x40000000  # iCloud placeholder, content not on disk
 
 _CLOUD_PLACEHOLDER_ATTRS = (
     FILE_ATTRIBUTE_OFFLINE
@@ -64,13 +72,28 @@ def windows_attrs(path: Path) -> int | None:
         return None
 
 
+def macos_flags(path: Path) -> int | None:
+    """Return the macOS file flags of ``path`` (not following links)."""
+    if not IS_MACOS:
+        return None
+    try:
+        return path.lstat().st_flags
+    except OSError:
+        return None
+
+
 def is_hidden(path: Path) -> bool:
     """
     Return True for dot-files and, on Windows, for files marked hidden or
-    system. Unreadable attributes on Windows count as hidden.
+    system. On macOS the Finder "hidden" flag counts too. Unreadable
+    attributes or flags count as hidden.
     """
     if path.name.startswith("."):
         return True
+    # Windows wins if both are set: tests patch IS_WINDOWS on macOS runners.
+    if IS_MACOS and not IS_WINDOWS:
+        flags = macos_flags(path)
+        return flags is None or bool(flags & UF_HIDDEN)
     if not IS_WINDOWS:
         return False
     attrs = windows_attrs(path)
@@ -99,7 +122,10 @@ def is_link_like(path: Path) -> bool:
 
 
 def is_cloud_placeholder(path: Path) -> bool:
-    """Return True for Windows cloud files whose content is not on disk."""
+    """Return True for Windows or iCloud files whose content is not on disk."""
+    if IS_MACOS and not IS_WINDOWS:
+        flags = macos_flags(path)
+        return flags is not None and bool(flags & SF_DATALESS)
     attrs = windows_attrs(path)
     return attrs is not None and bool(attrs & _CLOUD_PLACEHOLDER_ATTRS)
 
@@ -127,6 +153,44 @@ def windows_name_problem(name: str) -> str | None:
         return f"'{device}' is a reserved device name on Windows."
 
     return None
+
+
+def macos_name_problem(name: str) -> str | None:
+    """Return why ``name`` is not a good macOS folder name, or None."""
+    # POSIX accepts ":" but Finder shows it as "/" (and the reverse).
+    if ":" in name:
+        return "Folder name cannot contain ':' on macOS (Finder shows it as '/')."
+    return None
+
+
+def collision_key(path: Path) -> Path:
+    """
+    Return ``path`` normalized the way the filesystem compares names: on
+    macOS APFS ignores case and Unicode normalization (NFC vs NFD), elsewhere
+    the path is returned unchanged.
+    """
+    if not IS_MACOS:
+        return path
+    decomposed = unicodedata.normalize("NFD", str(path))
+    return Path(unicodedata.normalize("NFD", decomposed.casefold()))
+
+
+class _FoldedPathSet(set):
+    """Set of paths that treats names the filesystem sees as equal as one."""
+
+    def add(self, path: Path) -> None:
+        super().add(collision_key(path))
+
+    def __contains__(self, path: object) -> bool:
+        return isinstance(path, Path) and super().__contains__(collision_key(path))
+
+
+def new_reserved_set() -> set[Path]:
+    """
+    Return an empty set for planned destinations. A plain ``set`` except on
+    macOS, where ``A.txt`` and ``a.txt`` (or NFC/NFD spellings) are one name.
+    """
+    return _FoldedPathSet() if IS_MACOS else set()
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +222,10 @@ def move_file(src: Path, dst: Path) -> None:
     try:
         os.link(src, dst, follow_symlinks=False)
     except OSError as exc:
+        # On macOS EPERM means a locked (uchg) file, not missing hard links:
+        # the copy would inherit the lock and could not be removed again.
+        if IS_MACOS and exc.errno == errno.EPERM:
+            raise
         if exc.errno not in _NO_HARDLINK_ERRNOS:
             raise
         _copy_then_unlink(src, dst)
@@ -197,6 +265,25 @@ def trash_windows(path: Path) -> tuple[bool, str | None]:
     return True, None
 
 
+def trash_macos(path: Path) -> tuple[bool, str | None]:
+    """
+    Send ``path`` to the Finder Trash, where Put Back works. On a volume
+    without a Trash this fails and leaves the file in place.
+    """
+    try:
+        from Foundation import NSURL, NSFileManager
+    except ImportError as exc:
+        return False, f"Failed to trash '{path.name}': {exc}"
+
+    url = NSURL.fileURLWithPath_(str(path))
+    manager = NSFileManager.defaultManager()
+    ok, _, error = manager.trashItemAtURL_resultingItemURL_error_(url, None, None)
+    if not ok:
+        # localizedFailureReason() is often None; the description never is.
+        return False, f"Failed to trash '{path.name}': {error.localizedDescription()}"
+    return True, None
+
+
 def windows_drive_type(root: str) -> int:
     """Return the ``GetDriveTypeW`` result for the drive root ``root``."""
     import ctypes
@@ -214,6 +301,7 @@ def trash_may_be_permanent(path: Path) -> bool:
     network shares) there may be no Recycle Bin. Always False off Windows.
     A missing drive root or a failed lookup counts as True.
     """
+    # macOS: trashItemAtURL fails instead of deleting where there is no Trash.
     if not IS_WINDOWS:
         return False
     drive = os.path.splitdrive(os.path.abspath(path))[0]
@@ -236,6 +324,15 @@ def describe_os_error(exc: OSError) -> str:
         winerror = getattr(exc, "winerror", None)
         if winerror in messages:
             return messages[winerror]
+    elif IS_MACOS and exc.errno == errno.EPERM:
+        # EPERM, not EACCES: both a Finder lock and a privacy (TCC) denial
+        # report "Operation not permitted".
+        return (
+            "The item is locked in Finder, or macOS privacy settings block File "
+            "Suite (or the terminal it runs from). Unlock it in Get Info, or allow "
+            "access under System Settings › Privacy & Security › Files and "
+            "Folders (or Full Disk Access)."
+        )
     return str(exc)
 
 
@@ -245,9 +342,13 @@ def describe_os_error(exc: OSError) -> str:
 
 def mono_font() -> str:
     """Return the monospace font family name for the log view."""
-    return "Consolas" if IS_WINDOWS else "Monospace"
+    if IS_WINDOWS:
+        return "Consolas"
+    return "Menlo" if IS_MACOS else "Monospace"
 
 
 def trash_label() -> str:
     """Return the user-facing name of the system trash."""
-    return "Recycle Bin" if IS_WINDOWS else "system trash"
+    if IS_WINDOWS:
+        return "Recycle Bin"
+    return "Trash" if IS_MACOS else "system trash"

@@ -85,9 +85,47 @@ jobs:
             dist/*.zip.sha256
           if-no-files-found: error
 
+  build-macos:
+    name: Build macOS bundle (${{ matrix.arch }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build bundle
+        run: ./packaging/macos/build.sh
+
+      - name: Verify checksum
+        run: |
+          cd dist
+          shasum -a 256 -c *.dmg.sha256
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileSuite-macos-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
   build-release:
     name: Build & Publish Release
-    needs: [validate, build-windows]
+    needs: [validate, build-windows, build-macos]
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
@@ -114,6 +152,13 @@ jobs:
           name: FileSuite-windows-x64
           path: dist
 
+      - name: Download macOS bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: FileSuite-macos-*
+          merge-multiple: true
+          path: dist
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -123,4 +168,6 @@ jobs:
             dist/FileSuite.sha256
             dist/FileSuite-windows-x64-*.zip
             dist/FileSuite-windows-x64-*.zip.sha256
+            dist/FileSuite-macos-*.dmg
+            dist/FileSuite-macos-*.dmg.sha256
           generate_release_notes: true

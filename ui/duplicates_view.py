@@ -15,9 +15,9 @@ from models import (
     clear_duplicate_selection,
     select_all_duplicates,
 )
-from platform_utils import trash_label
+from platform_utils import IS_MACOS, trash_label
 from ui import theme as t
-from ui.formatting import format_size, plural, selection_summary
+from ui.formatting import format_size, plural, selection_summary, shortcut
 from ui.widgets import (
     Banner,
     Card,
@@ -80,7 +80,10 @@ class DuplicatesView(ctk.CTkFrame):
         bar.grid_columnconfigure(2, weight=1)
         self.scan_button = primary_button(bar, "Scan Folder", self.app.start_duplicate_scan, width=112)
         self.scan_button.grid(row=0, column=0, rowspan=2)
-        tooltip(self.scan_button, "Compare every file directly in this folder. Nothing changes.  (Ctrl+Enter)")
+        tooltip(
+            self.scan_button,
+            f"Compare every file directly in this folder. Nothing changes.  ({shortcut('Enter')})",
+        )
         self.cancel_button = secondary_button(bar, "Cancel", self.app.cancel_duplicate_scan, width=80)
         self.cancel_button.grid(row=0, column=1, rowspan=2, padx=(t.SPACE, 0))
         self.cancel_button.grid_remove()
@@ -144,6 +147,10 @@ class DuplicatesView(ctk.CTkFrame):
         self.tree.bind("<Button-1>", self._on_click)
         self.tree.bind("<space>", self._on_space)
         self.tree.bind("<Delete>", lambda _e: self.app.trash_selected_duplicates())
+        if IS_MACOS:
+            # The Mac "delete" key is BackSpace, and Finder's "Move to Trash" is Cmd+Backspace.
+            self.tree.bind("<BackSpace>", lambda _e: self.app.trash_selected_duplicates())
+            self.tree.bind("<Command-BackSpace>", lambda _e: self.app.trash_selected_duplicates())
 
         self.empty = EmptyState(body, "Scan Folder", self.app.start_duplicate_scan)
         self.empty.grid(row=0, column=0, rowspan=4, columnspan=2, sticky="nsew")
@@ -170,11 +177,14 @@ class DuplicatesView(ctk.CTkFrame):
         self.trash_button.grid(row=0, column=1, padx=(0, t.SPACE))
         tooltip(
             self.trash_button,
-            f"Send the ticked copies to the {trash_label()}. This can't be undone from File Suite.  (Delete)",
+            f"Send the ticked copies to the {trash_label()}. This can't be undone from File Suite.  ({shortcut('Delete')})",
         )
         self.move_button = primary_button(footer, "", self.app.move_selected_duplicates)
         self.move_button.grid(row=0, column=2)
-        tooltip(self.move_button, "Move the ticked copies into a “Duplicates” folder here. You can undo this.  (Ctrl+M)")
+        tooltip(
+            self.move_button,
+            f"Move the ticked copies into a “Duplicates” folder here. You can undo this.  ({shortcut('M')})",
+        )
         return footer
 
     # ------------------------------------------------------------------
@@ -422,7 +432,8 @@ class DuplicatesView(ctk.CTkFrame):
         if may_be_permanent:
             text = f"Files on this drive may have been deleted permanently instead of going {where}."
         else:
-            text = f"Restore them from the {trash_label()} in your file manager if needed."
+            where_to = "Finder" if IS_MACOS else "your file manager"
+            text = f"Restore them from the {trash_label()} in {where_to} if needed."
         if failed == 0 and skipped == 0:
             self.banner.show("warning" if may_be_permanent else "success", f"Removed {plural(removed, 'file')}", text)
             return

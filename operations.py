@@ -29,12 +29,15 @@ from models import (
     OperationType,
 )
 from platform_utils import (
+    IS_MACOS,
     IS_WINDOWS,
     describe_os_error,
     is_cloud_placeholder,
     is_hidden,
     is_link_like,
     move_file,
+    new_reserved_set,
+    trash_macos,
     trash_windows,
 )
 
@@ -69,11 +72,13 @@ def build_organization_plan(
         validated_custom_dest = res  # type: ignore[assignment]
 
     plan = OperationPlan(target_dir=target_dir)
-    planned_destinations: set[Path] = set()
+    planned_destinations = new_reserved_set()
 
     try:
         entries = list(target_dir.iterdir())
     except OSError as exc:
+        if IS_MACOS:
+            return False, plan, f"Failed to list directory contents: {describe_os_error(exc)}"
         return False, plan, f"Failed to list directory contents: {exc}"
 
     for item in sorted(entries, key=lambda p: p.name.lower()):
@@ -255,7 +260,7 @@ def execute_operation_plan(
     total = len(items_to_exec)
 
     # Track destinations used during this execution to prevent collisions within batch
-    allocated_destinations: set[Path] = set()
+    allocated_destinations = new_reserved_set()
 
     for idx, item in enumerate(items_to_exec, 1):
         if on_progress:
@@ -467,7 +472,8 @@ def move_to_system_trash(
     default ~/.local/share/Trash).
 
     Creates compliant .trashinfo metadata. Cleans up orphaned metadata
-    if moving the file fails.
+    if moving the file fails. Without ``trash_dir``, Windows uses the
+    Recycle Bin and macOS the Finder Trash instead.
     Returns (success: bool, error_message: str | None).
     """
     if not file_path.exists():
@@ -481,6 +487,9 @@ def move_to_system_trash(
 
     if trash_dir is None and IS_WINDOWS:
         return trash_windows(file_path)
+
+    if trash_dir is None and IS_MACOS:
+        return trash_macos(file_path)
 
     if trash_dir is None:
         # FreeDesktop spec: $XDG_DATA_HOME if set to an absolute path, else ~/.local/share
@@ -613,7 +622,7 @@ def build_duplicate_move_plan(
     dup_folder_resolved = dup_folder.resolve(strict=False)
 
     plan = OperationPlan(target_dir=target_dir)
-    planned_destinations: set[Path] = set()
+    planned_destinations = new_reserved_set()
 
     for f in duplicates:
         skip_reason: str | None = None

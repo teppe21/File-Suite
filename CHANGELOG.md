@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **macOS Support (Experimental)**: File Suite runs on macOS 15 and newer, from source and as an app bundle for Apple silicon and Intel Macs. It is tested through CI on macOS 15 and 26 (the app bundle only on macOS 26, the Intel one with a start-up check only), not yet by hand on a real Mac. Linux and Windows behavior is unchanged.
+  - Files with the Finder "hidden" flag and iCloud Drive files that are only in the cloud are skipped; folder names containing `:` are rejected; names that APFS treats as the same (`A.txt` and `a.txt`, composed and decomposed accents) count as one when planning moves, so nothing is overwritten.
+  - Deleted duplicates go to the Finder Trash (installs `pyobjc-framework-Cocoa` on macOS only). If the Trash cannot be used, the file stays where it is and the failure is logged; nothing is deleted permanently.
+  - Locked files and files blocked by privacy settings are reported as failed and left in place; the error message explains both causes.
+  - Moves that need the copy fallback (another volume, FAT/exFAT) do not carry extended attributes or Finder tags.
+  - Command-key shortcuts: ⌘O, ⌘1/2/3, ⌘↩, ⇧⌘M (Move; ⌘M stays Minimize), ⌘Z, ⌘⌫ in the Duplicates list, ⌘. closes dialogs, ⌘W and ⌘Q close the app. `.dmg`, `.pkg` and `.command` files are sorted into "Installers & Code", and the log uses Menlo.
+- **macOS Packaging**: `packaging/macos/build.sh` builds `FileSuite.app` with PyInstaller and writes `FileSuite-macos-<arch>-v<version>.dmg` (`arm64` or `x86_64`, the architecture of the build machine) with a SHA-256 checksum file. The app is signed ad hoc and not notarized, so macOS blocks the first launch; the steps are in `docs/SAFETY.md`.
+- **macOS CI**: `macos.yml` runs the test suite on macOS 15 and 26 with Python 3.11-3.13 and builds the app and DMG for Apple silicon and Intel; the DMGs are uploaded as workflow artifacts.
+- **macOS Release Assets**: `release.yml` builds both DMGs and attaches them and their `.sha256` files to the GitHub Release (not yet run for a real release). The Intel DMG depends on GitHub's Intel macOS runner, which GitHub has announced it will stop offering after the macOS 15 runner image is retired (Fall 2027); it cannot be built after that.
+- macOS-specific and cross-platform unit tests (`test_macos.py`, `test_ui_macos.py`, `test_macos_gui.py`, `test_macos_bundle.py`).
+
 ### Changed
 - README shortened; safety, architecture and release details moved to docs/.
 - **Redesigned interface**: what the app does to files is unchanged.

@@ -8,6 +8,24 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from models import DuplicateGroup, ExecutionResult, OperationPlan
+from platform_utils import IS_MACOS
+
+# macOS spellings that are not just "⌘" plus the key. ⌘M is Minimize in every Mac
+# app's Window menu, which Tk runs in addition to a binding, so Move uses ⇧⌘M.
+_MAC_SHORTCUTS = {"M": "⇧⌘M", "Enter": "⌘↩", "Delete": "⌘⌫"}
+
+
+def shortcut(key: str) -> str:
+    """
+    A shortcut as shown in tooltips: ``shortcut("O")`` -> ``"Ctrl+O"``,
+    ``shortcut("Enter")`` -> ``"Ctrl+Enter"``, and ``shortcut("Delete")`` -> the
+    bare ``"Delete"``. On macOS the command key replaces Ctrl: ``"⌘O"``, ``"⌘↩"``,
+    and ``"⌘⌫"`` for the trash key (Mac keyboards send BackSpace for "delete").
+    ``"M"`` (move) becomes ``"⇧⌘M"``.
+    """
+    if IS_MACOS:
+        return _MAC_SHORTCUTS.get(key, "⌘" + key)
+    return key if key == "Delete" else f"Ctrl+{key}"
 
 
 def format_size(num_bytes: int) -> str:

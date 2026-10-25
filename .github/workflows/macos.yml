@@ -1,0 +1,188 @@
+name: macOS Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Check Tk
+        run: |
+          python -c "import tkinter, platform; print(tkinter.TkVersion, tkinter.Tcl().eval('info patchlevel'), platform.machine(), platform.mac_ver()[0]); assert tkinter.TkVersion >= 8.6"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        env:
+          FILESUITE_REAL_TRASH_TEST: "1"
+          FILESUITE_REAL_APPEARANCE_TEST: "1"
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Run pip-audit vulnerability scan
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
+      - name: Smoke test
+        env:
+          TAKE_SCREENSHOT: ${{ matrix.python-version == '3.13' && '1' || '' }}
+        run: |
+          python main.py &
+          pid=$!
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "main.py exited within 5 seconds" >&2
+            exit 1
+          fi
+          if [ -n "$TAKE_SCREENSHOT" ]; then
+            screencapture -x screenshot.png || echo "screencapture failed" >&2
+          fi
+          kill "$pid"
+
+      - name: Upload window screenshot
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-${{ matrix.os }}
+          path: screenshot.png
+          if-no-files-found: warn
+
+  build:
+    name: Build (macOS app bundle, ${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build bundle
+        run: ./packaging/macos/build.sh
+
+      - name: Verify checksum
+        run: |
+          python -c "import glob, hashlib, os, platform, version; f = glob.glob('dist/*.dmg')[0]; h, n = open(f + '.sha256').read().split(); assert n == os.path.basename(f) == f'FileSuite-macos-{platform.machine()}-v{version.__version__}.dmg'; assert h == hashlib.sha256(open(f, 'rb').read()).hexdigest(); print(n, 'OK')"
+
+      - name: Check release asset names
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          # release.yml publishes dist/FileSuite-macos-*.dmg and its .sha256 and fails
+          # when a pattern matches nothing; hold this build to the same patterns.
+          status=0
+          patterns="$(sed -n 's|^ *\(dist/FileSuite-macos-[^ ]*\)$|\1|p' .github/workflows/release.yml)"
+          [ "$(printf '%s\n' "$patterns" | wc -l | tr -d ' ')" = 2 ] || { echo "release.yml should list two macOS file patterns" >&2; exit 1; }
+          while read -r pattern; do
+              matches=($pattern)
+              if [ "${#matches[@]}" -eq 1 ] && [ -f "${matches[0]}" ]; then
+                  echo "$pattern -> ${matches[0]}"
+              else
+                  echo "release.yml pattern '$pattern' matches: ${matches[*]}" >&2
+                  status=1
+              fi
+          done <<< "$patterns"
+          version="$(python -c "import version; print(version.__version__)")"
+          [ -f "dist/FileSuite-macos-$ARCH-v$version.dmg" ] || { echo "dist/FileSuite-macos-$ARCH-v$version.dmg is missing" >&2; status=1; }
+          exit "$status"
+
+      - name: Check DMG contents
+        run: |
+          mnt="$(mktemp -d)"
+          hdiutil attach dist/*.dmg -readonly -nobrowse -mountpoint "$mnt"
+          status=0
+          ls -la "$mnt"
+          [ -x "$mnt/FileSuite.app/Contents/MacOS/FileSuite" ] || { echo "FileSuite.app is missing from the DMG" >&2; status=1; }
+          [ "$(readlink "$mnt/Applications")" = "/Applications" ] || { echo "Applications link is missing from the DMG" >&2; status=1; }
+          codesign --verify --deep --strict --verbose=2 "$mnt/FileSuite.app" || status=1
+          hdiutil detach "$mnt" || { sleep 3; hdiutil detach -force "$mnt"; }
+          exit "$status"
+
+      - name: Smoke test
+        run: |
+          dist/FileSuite.app/Contents/MacOS/FileSuite > smoke.log 2>&1 &
+          pid=$!
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "FileSuite exited within 5 seconds" >&2
+            cat smoke.log
+            exit 1
+          fi
+          screencapture -x bundle-screenshot.png || echo "screencapture failed" >&2
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          cat smoke.log
+          if grep -q "Could not load window icon" smoke.log; then
+            echo "The bundle could not load its window icon" >&2
+            exit 1
+          fi
+
+      - name: Upload bundle screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-window-${{ matrix.runner }}
+          path: bundle-screenshot.png
+          if-no-files-found: warn
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileSuite-macos-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
+      - name: Show Gatekeeper's verdict on a quarantined copy
+        timeout-minutes: 2
+        run: |
+          # Informational, never fails: this is what a user's Mac says about the
+          # ad-hoc signed, not notarized download. Works on a copy; nothing here
+          # clears quarantine on the build or for users.
+          copy="$(mktemp -d)/FileSuite.app"
+          ditto dist/FileSuite.app "$copy"
+          xattr -w com.apple.quarantine "0083;$(printf '%x' "$(date +%s)");Safari;" "$copy"
+          xattr -l "$copy"
+          spctl --status || true
+          codesign -dr - "$copy" || true
+          spctl --assess --type execute -vv "$copy" || echo "spctl exit code: $?"
