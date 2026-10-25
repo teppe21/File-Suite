@@ -39,7 +39,7 @@ _RECORDED = (
 
 # ANSI key codes
 KEY_O, KEY_Z, KEY_M, KEY_W, KEY_1, KEY_2, KEY_3 = 31, 6, 46, 13, 18, 19, 20
-KEY_RETURN, KEY_BACKSPACE, KEY_FORWARD_DELETE, KEY_PERIOD, KEY_A = 36, 51, 117, 47, 0
+KEY_RETURN, KEY_BACKSPACE, KEY_FORWARD_DELETE, KEY_PERIOD, KEY_A, KEY_ESCAPE = 36, 51, 117, 47, 0, 53
 
 _state: dict = {}
 
@@ -128,19 +128,23 @@ def _activate():
     _app().update()
 
 
-def press(chars: str, keycode: int, command: bool = True, widget=None):
-    """Send one key press (down and up) to the app, as the window server would."""
-    appkit = _state["AppKit"]
+def modifier_flags(command: bool = False, shift: bool = False) -> int:
+    import AppKit
+
+    return (AppKit.NSEventModifierFlagCommand if command else 0) | (
+        AppKit.NSEventModifierFlagShift if shift else 0
+    )
+
+
+def post_key(chars: str, keycode: int, flags: int = 0, window_number: int | None = None):
+    """Queue a key down and up for the key window; Tk takes them off the queue as it runs."""
+    import AppKit
     import Foundation
 
-    _activate()
-    if widget is not None:
-        widget.focus_force()
-        _app().update()
-    flags = appkit.NSEventModifierFlagCommand if command else 0
-    window_number = _window().windowNumber()
-    for kind in (appkit.NSEventTypeKeyDown, appkit.NSEventTypeKeyUp):
-        event = appkit.NSEvent.keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode_(
+    if window_number is None:
+        window_number = AppKit.NSApp.keyWindow().windowNumber()
+    for kind in (AppKit.NSEventTypeKeyDown, AppKit.NSEventTypeKeyUp):
+        event = AppKit.NSEvent.keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode_(
             kind,
             Foundation.NSMakePoint(0, 0),
             flags,
@@ -152,8 +156,17 @@ def press(chars: str, keycode: int, command: bool = True, widget=None):
             False,
             keycode,
         )
-        appkit.NSApp.postEvent_atStart_(event, False)
-    for _ in range(10):  # let Tk take the events off the queue and run the bindings
+        AppKit.NSApp.postEvent_atStart_(event, False)
+
+
+def press(chars: str, keycode: int, command: bool = True, shift: bool = False, widget=None):
+    """Send one key press to the app the way the window server does, and let Tk handle it."""
+    _activate()
+    if widget is not None:
+        widget.focus_force()
+        _app().update()
+    post_key(chars, keycode, modifier_flags(command, shift), _window().windowNumber())
+    for _ in range(10):
         _app().update()
         time.sleep(0.02)
 
@@ -168,11 +181,13 @@ def run_app_script(body: str) -> subprocess.CompletedProcess:
         """
         import sys
         sys.path.insert(0, %r)
+        sys.path.insert(0, %r)
         from pathlib import Path
         from AppKit import NSApp
+        import test_macos_gui as keys
         import ui.app as ui_app
         """
-    ) % str(ROOT)
+    ) % (str(ROOT), str(ROOT / "tests"))
     return subprocess.run(
         [sys.executable, "-c", prelude + textwrap.dedent(body)],
         cwd=ROOT,
@@ -195,6 +210,7 @@ class WindowTests(unittest.TestCase):
             "⌘3",
             "Compare every file directly in this folder. Nothing changes.  (⌘↩)",
             "Show what would move. Nothing changes yet.  (⌘↩)",
+            "Move the previewed files into their folders. You can undo this.  (⇧⌘M)",
         ):
             self.assertIn(expected, shown)
         self.assertFalse([t for t in shown if "Ctrl" in t])
@@ -325,28 +341,50 @@ class ShortcutKeyTests(unittest.TestCase):
         _probe(f"[probe] Cmd+W -> _on_closing called {calls('_on_closing')}x")
         self.assertGreaterEqual(calls("_on_closing"), 1)
 
-    def test_z_cmd_m_is_the_minimize_key(self):
-        """Runs last of the key tests: it minimizes the window."""
+    def test_shift_cmd_m_moves(self):
+        press("M", KEY_M, shift=True)
+        self.assertEqual(calls("_move_shortcut"), 1)
+        self.assertNotEqual(_app().state(), "iconic")
+
+    def test_z_cmd_m_only_minimizes(self):
+        """Last of the key tests: it minimizes the window. Plain Cmd+M must not also move files."""
         press("m", KEY_M)
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline and _app().state() != "iconic":
             _app().update()
             time.sleep(0.05)
-        _probe(f"[probe] Cmd+M -> _move_shortcut called {calls('_move_shortcut')}x, window state={_app().state()}")
+        _probe(f"[probe] Cmd+M -> window state={_app().state()}, _move_shortcut called {calls('_move_shortcut')}x")
         _app().deiconify()
         _app().update()
+        self.assertEqual(calls("_move_shortcut"), 0)
 
     def test_delete_keys_trash_in_the_duplicates_list(self):
-        _app().show_view("duplicates")
-        tree = _app().duplicates.tree
+        from models import DuplicateFile, DuplicateGroup
+
+        app = _app()
+        files = [
+            DuplicateFile(Path("/tmp/a.txt"), 5, is_original=True),
+            DuplicateFile(Path("/tmp/b.txt"), 5, selected=True),
+        ]
+        app.duplicate_groups = [DuplicateGroup("g", "0" * 64, 5, files)]
+        app.duplicates.render_groups()  # the list is only on screen when there are results
+        self.addCleanup(self._clear_results)
+        app.show_view("duplicates")
+        app.update()
+        tree = app.duplicates.tree
         for chars, keycode, command in (
             ("\x7f", KEY_BACKSPACE, False),  # the Mac "delete" key
             ("\x7f", KEY_BACKSPACE, True),  # Cmd+Delete, Finder's Move to Trash
-            ("", KEY_FORWARD_DELETE, False),
+            ("\uf728", KEY_FORWARD_DELETE, False),
         ):
             _state["mocks"]["trash_selected_duplicates"].reset_mock()
             press(chars, keycode, command=command, widget=tree)
             self.assertEqual(calls("trash_selected_duplicates"), 1, (keycode, command))
+
+    @staticmethod
+    def _clear_results():
+        _app().duplicate_groups = []
+        _app().duplicates.render_groups()
 
     def test_rule_entries_keep_their_editing_keys(self):
         field = _find_entry(_app().organize)
@@ -369,6 +407,34 @@ def _find_entry(widget):
         if found is not None:
             return found
     return None
+
+
+class DialogTests(unittest.TestCase):
+    """The confirmation dialog on this Tk (Tk 8.6.12 of Python 3.10 lacks the ISO_Left_Tab keysym)."""
+
+    def _assert_cancelled_by(self, chars: str, keycode: int, command: bool):
+        result = run_app_script(
+            f"""
+            from ui.widgets import confirm_dialog
+            app = ui_app.FileOrganizerApp()
+            app.update()
+            app.after(700, lambda: keys.post_key({chars!r}, {keycode}, keys.modifier_flags(command={command})))
+            app.after(8000, lambda: (print("TIMEOUT"), app.destroy()))
+            answer = confirm_dialog(app, "Title", "Message", confirm_text="Do it")
+            print("RESULT answer=%s" % answer)
+            """
+        )
+        _probe(f"[probe] dialog key {keycode}: rc={result.returncode} out={result.stdout[-120:]!r} err={result.stderr[-300:]!r}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("TIMEOUT", result.stdout)
+        self.assertIn("RESULT answer=False", result.stdout)
+
+    def test_escape_cancels(self):
+        self._assert_cancelled_by("\x1b", KEY_ESCAPE, command=False)
+
+    def test_cmd_period_cancels(self):
+        self._assert_cancelled_by(".", KEY_PERIOD, command=True)
 
 
 class QuitTests(unittest.TestCase):
