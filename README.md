@@ -1,13 +1,17 @@
 # File Suite
 
 ![Python](https://img.shields.io/badge/Python-3.10%20--%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(experimental)%20%7C%20macOS%20(experimental)-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Windows (beta)](https://img.shields.io/badge/Windows%20%28beta%29-0078D4?style=for-the-badge&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEgMy41bDkuNS0xLjN2OUgxek0xMS43IDJsMTEuMy0xLjZ2MTAuOEgxMS43ek0xIDEyLjRoOS41djlsLTkuNS0xLjN6TTExLjcgMTIuNEgyM3YxMC44TDExLjcgMjEuNnoiLz48L3N2Zz4%3D)
+![macOS (beta)](https://img.shields.io/badge/macOS%20%28beta%29-6E6E73?style=for-the-badge&logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 [![Tests and Lint](https://github.com/teppe21/File-Suite/actions/workflows/tests.yml/badge.svg)](https://github.com/teppe21/File-Suite/actions/workflows/tests.yml)
 [![Windows Tests](https://github.com/teppe21/File-Suite/actions/workflows/windows.yml/badge.svg)](https://github.com/teppe21/File-Suite/actions/workflows/windows.yml)
 [![macOS Tests](https://github.com/teppe21/File-Suite/actions/workflows/macos.yml/badge.svg)](https://github.com/teppe21/File-Suite/actions/workflows/macos.yml)
 
-File Suite is a desktop app that sorts the loose files in a folder into category subfolders and finds byte-identical duplicates by SHA-256. Every change is shown as a preview first, nothing happens until you confirm, existing files are never overwritten, and the last operation can be undone. It works only on files directly inside the chosen folder; subfolders, hidden files and symlinks are skipped.
+Folders like Downloads fill up with loose files: photos, PDFs, installers, archives, and the same file saved two or three times. File Suite is a small desktop app that tidies one folder at a time. It sorts the loose files into category subfolders and finds byte-identical duplicates (compared by SHA-256), so you can remove the extra copies.
+
+It is meant to be a careful helper, not a file manager or a backup tool. Every change is shown as a preview first, nothing happens until you confirm, existing files are never overwritten, and the last operation can be undone. It works only on files directly inside the chosen folder; subfolders, hidden files and symlinks are skipped.
 
 <p align="center">
   <img src="docs/screenshots/organize.png" width="780" alt="Organize view: category rules and a preview of which files move where, including a rename" />
