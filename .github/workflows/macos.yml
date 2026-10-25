@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-26, macos-15]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Check out repository
@@ -78,9 +78,6 @@ jobs:
   build:
     name: Build (macOS app bundle, ${{ matrix.arch }})
     needs: test
-    # pip-audit is red on every platform until the Pillow pin moves (handoff N1),
-    # which would skip this job; drop the condition once pip-audit is green again.
-    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
