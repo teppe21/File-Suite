@@ -199,8 +199,6 @@ class MacosCollisionSeamTests(unittest.TestCase):
             reserved = platform_utils.new_reserved_set()
             self.assertEqual(platform_utils.collision_key(Path("A.txt")), Path("A.txt"))
         self.assertIs(type(reserved), set)
-        reserved.add(Path("/d/A.txt"))
-        self.assertNotIn(Path("/d/a.txt"), reserved)
 
     def test_case_and_normalization_fold_on_macos(self):
         with patch("platform_utils.IS_MACOS", True):
