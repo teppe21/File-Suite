@@ -41,6 +41,7 @@ jobs:
       - name: Run unit tests
         env:
           FILESUITE_REAL_TRASH_TEST: "1"
+          FILESUITE_REAL_APPEARANCE_TEST: "1"
         run: |
           python -m unittest discover -s tests -v
 
@@ -51,6 +52,8 @@ jobs:
           pip-audit -r requirements.txt
 
       - name: Smoke test
+        env:
+          TAKE_SCREENSHOT: ${{ matrix.python-version == '3.13' && '1' || '' }}
         run: |
           python main.py &
           pid=$!
@@ -59,4 +62,15 @@ jobs:
             echo "main.py exited within 5 seconds" >&2
             exit 1
           fi
+          if [ -n "$TAKE_SCREENSHOT" ]; then
+            screencapture -x screenshot.png || echo "screencapture failed" >&2
+          fi
           kill "$pid"
+
+      - name: Upload window screenshot
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-${{ matrix.os }}
+          path: screenshot.png
+          if-no-files-found: warn
