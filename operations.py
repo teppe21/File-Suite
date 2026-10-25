@@ -29,6 +29,7 @@ from models import (
     OperationType,
 )
 from platform_utils import (
+    IS_MACOS,
     IS_WINDOWS,
     describe_os_error,
     is_cloud_placeholder,
@@ -75,6 +76,8 @@ def build_organization_plan(
     try:
         entries = list(target_dir.iterdir())
     except OSError as exc:
+        if IS_MACOS:
+            return False, plan, f"Failed to list directory contents: {describe_os_error(exc)}"
         return False, plan, f"Failed to list directory contents: {exc}"
 
     for item in sorted(entries, key=lambda p: p.name.lower()):

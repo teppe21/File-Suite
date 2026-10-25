@@ -2,8 +2,8 @@
 Platform-specific helpers for File Suite.
 
 Every function keeps the existing Linux behavior on non-Windows systems and
-adds the Windows equivalent behind ``IS_WINDOWS``. This module must not
-import any other project module.
+adds the Windows equivalent behind ``IS_WINDOWS``; macOS equivalents sit
+behind ``IS_MACOS``. This module must not import any other project module.
 """
 
 from __future__ import annotations
@@ -31,9 +31,11 @@ IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 IO_REPARSE_TAG_SYMLINK = 0xA000000C
 DRIVE_FIXED = 3  # GetDriveTypeW result for a local fixed disk
 
-# BSD file flags (``st_flags``). ``SF_DATALESS`` marks an iCloud placeholder
-# whose content is not on disk; the ``stat`` module lacks it before Python 3.13.
-SF_DATALESS = 0x40000000
+# macOS file flags (``st_flags``), defined here because the ``stat`` module
+# lacks ``SF_DATALESS`` before Python 3.13. Values from Apple's xnu
+# bsd/sys/stat.h (github.com/apple-oss-distributions/xnu, and the macOS SDK).
+UF_HIDDEN = 0x8000  # hidden in Finder
+SF_DATALESS = 0x40000000  # iCloud placeholder, content not on disk
 
 _CLOUD_PLACEHOLDER_ATTRS = (
     FILE_ATTRIBUTE_OFFLINE
@@ -70,24 +72,28 @@ def windows_attrs(path: Path) -> int | None:
         return None
 
 
-def macos_flags(path: Path) -> int:
-    """Return the BSD file flags of ``path`` (not following links), 0 if unknown."""
+def macos_flags(path: Path) -> int | None:
+    """Return the macOS file flags of ``path`` (not following links)."""
+    if not IS_MACOS:
+        return None
     try:
-        return getattr(path.lstat(), "st_flags", 0)
+        return path.lstat().st_flags
     except OSError:
-        return 0
+        return None
 
 
 def is_hidden(path: Path) -> bool:
     """
     Return True for dot-files and, on Windows, for files marked hidden or
-    system. Unreadable attributes on Windows count as hidden. On macOS the
-    Finder "hidden" flag counts too.
+    system. On macOS the Finder "hidden" flag counts too. Unreadable
+    attributes or flags count as hidden.
     """
     if path.name.startswith("."):
         return True
+    # Windows wins if both are set: tests patch IS_WINDOWS on macOS runners.
     if IS_MACOS and not IS_WINDOWS:
-        return bool(macos_flags(path) & stat.UF_HIDDEN)
+        flags = macos_flags(path)
+        return flags is None or bool(flags & UF_HIDDEN)
     if not IS_WINDOWS:
         return False
     attrs = windows_attrs(path)
@@ -118,7 +124,8 @@ def is_link_like(path: Path) -> bool:
 def is_cloud_placeholder(path: Path) -> bool:
     """Return True for Windows or iCloud files whose content is not on disk."""
     if IS_MACOS and not IS_WINDOWS:
-        return bool(macos_flags(path) & SF_DATALESS)
+        flags = macos_flags(path)
+        return flags is not None and bool(flags & SF_DATALESS)
     attrs = windows_attrs(path)
     return attrs is not None and bool(attrs & _CLOUD_PLACEHOLDER_ATTRS)
 
@@ -293,12 +300,14 @@ def describe_os_error(exc: OSError) -> str:
         winerror = getattr(exc, "winerror", None)
         if winerror in messages:
             return messages[winerror]
-    elif IS_MACOS and exc.errno in (errno.EPERM, errno.EACCES):
-        if exc.filename and macos_flags(Path(os.fsdecode(exc.filename))) & stat.UF_IMMUTABLE:
-            return "The file is locked in Finder (uncheck 'Locked' in Get Info)."
+    elif IS_MACOS and exc.errno == errno.EPERM:
+        # EPERM, not EACCES: both a Finder lock and a privacy (TCC) denial
+        # report "Operation not permitted".
         return (
-            "Permission denied. Check the file's permissions, or allow File Suite "
-            "access to this folder in System Settings > Privacy & Security."
+            "The item is locked in Finder, or macOS privacy settings block File "
+            "Suite (or the terminal it runs from). Unlock it in Get Info, or allow "
+            "access under System Settings › Privacy & Security › Files and "
+            "Folders (or Full Disk Access)."
         )
     return str(exc)
 

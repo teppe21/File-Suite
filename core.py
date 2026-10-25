@@ -12,7 +12,6 @@ from platform_utils import (
     IS_MACOS,
     IS_WINDOWS,
     macos_name_problem,
-    new_reserved_set,
     windows_name_problem,
 )
 
@@ -261,7 +260,7 @@ def build_collision_safe_path(
         photo.jpg       -> photo_1.jpg
         file            -> file_1
     """
-    reserved = new_reserved_set() if reserved is None else reserved
+    reserved = reserved or set()
 
     def taken(candidate: Path) -> bool:
         return candidate.exists() or candidate.is_symlink() or candidate in reserved
