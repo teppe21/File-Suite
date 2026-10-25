@@ -428,7 +428,10 @@ def confirm_dialog(
     for key in ("<Return>", "<KP_Enter>", "<space>"):
         dialog.bind(key, lambda _e: order[focus[0]].invoke())
     for key in ("<Tab>", "<Shift-Tab>", "<ISO_Left_Tab>", "<Left>", "<Right>"):
-        dialog.bind(key, move_focus)
+        try:
+            dialog.bind(key, move_focus)
+        except tk.TclError:  # Tk 8.6.12 on macOS does not know the ISO_Left_Tab keysym
+            pass
     dialog.protocol("WM_DELETE_WINDOW", lambda: finish(False))
     show_focus()
 
