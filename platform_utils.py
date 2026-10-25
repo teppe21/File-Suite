@@ -222,6 +222,10 @@ def move_file(src: Path, dst: Path) -> None:
     try:
         os.link(src, dst, follow_symlinks=False)
     except OSError as exc:
+        # On macOS EPERM means a locked (uchg) file, not missing hard links:
+        # the copy would inherit the lock and could not be removed again.
+        if IS_MACOS and exc.errno == errno.EPERM:
+            raise
         if exc.errno not in _NO_HARDLINK_ERRNOS:
             raise
         _copy_then_unlink(src, dst)
