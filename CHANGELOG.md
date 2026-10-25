@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Results appear as messages inside the view instead of pop-ups; confirmations list the file count, size, destination and whether the action can be undone, including the permanent-delete warning for drives without a Recycle Bin.
   - Keyboard shortcuts: Ctrl+O, Ctrl+1/2/3, Ctrl+Enter, Ctrl+M, Ctrl+Z, Space, Delete, Esc.
 
+### Removed
+- Python 3.10 support, because Pillow 13 requires Python 3.11 or newer. Supported versions are now 3.11 to 3.13.
+
+### Security
+- Pillow raised to 13.0.0, which fixes the advisories `pip-audit` reports for 12.3.0.
+
 ---
 
 ## [1.2.0] - 2026-10-14
