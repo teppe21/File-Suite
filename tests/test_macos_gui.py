@@ -2,9 +2,11 @@
 GUI tests for the macOS port: they build the real window, so they run only on
 macOS with a window server (the CI runners have one) and are skipped elsewhere.
 
-Key presses are real ``NSEvent`` key-down events handed to ``NSApp.sendEvent_``,
-the same entry point the window server uses, so Tk's key handling and the Cocoa
-menu bar both see them. Everything that closes the app runs in a subprocess.
+Key presses are real ``NSEvent`` key events put on the application's event
+queue, which is where the window server's events arrive: Tk's event loop takes
+them off the queue and the Cocoa menu bar sees them afterwards, as for a real
+key. (``NSApp.sendEvent_`` would skip Tk.) Everything that closes the app runs
+in a subprocess.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -110,7 +113,7 @@ def _window():
     appkit = _state["AppKit"]
     window = appkit.NSApp.keyWindow()
     if window is None:
-        window = next(w for w in appkit.NSApp.windows() if w.isVisible())
+        window = next(w for w in appkit.NSApp.windows() if w.isVisible() or w.isMiniaturized())
     return window
 
 
@@ -148,8 +151,10 @@ def press(chars: str, keycode: int, command: bool = True, widget=None):
             False,
             keycode,
         )
-        appkit.NSApp.sendEvent_(event)
-    _app().update()
+        appkit.NSApp.postEvent_atStart_(event, False)
+    for _ in range(10):  # let Tk take the events off the queue and run the bindings
+        _app().update()
+        time.sleep(0.02)
 
 
 def calls(name: str) -> int:
@@ -319,21 +324,21 @@ class ShortcutKeyTests(unittest.TestCase):
         _probe(f"[probe] Cmd+W -> _on_closing called {calls('_on_closing')}x")
         self.assertGreaterEqual(calls("_on_closing"), 1)
 
-    def test_cmd_m(self):
+    def test_z_cmd_m_is_the_minimize_key(self):
+        """Runs last of the key tests: it minimizes the window."""
         window = _window()
         press("m", KEY_M)
-        for _ in range(20):
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not window.isMiniaturized():
             _app().update()
-            if window.isMiniaturized():
-                break
-            _state["AppKit"].NSRunLoop.currentRunLoop().runUntilDate_(
-                _state["AppKit"].NSDate.dateWithTimeIntervalSinceNow_(0.1)
-            )
+            time.sleep(0.05)
         minimized = window.isMiniaturized()
         _probe(f"[probe] Cmd+M -> _move_shortcut called {calls('_move_shortcut')}x, window minimized={minimized}")
-        if minimized:
-            window.deminiaturize_(None)
+        window.deminiaturize_(None)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and window.isMiniaturized():
             _app().update()
+            time.sleep(0.05)
 
     def test_delete_keys_trash_in_the_duplicates_list(self):
         _app().show_view("duplicates")
